@@ -1,0 +1,36 @@
+[tools]
+go = "1.26.1"
+
+[env]
+CGO_ENABLED = "0"
+
+[tasks.fmt]
+description = "Format Go sources"
+run = "gofmt -w cmd internal"
+
+[tasks.lint]
+description = "Run static analysis"
+run = "go vet ./..."
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
+
+[tasks.check]
+description = "Format-check, vet, and test"
+run = """
+test -z "$(gofmt -l cmd internal)"
+go vet ./...
+go test ./...
+"""
+
+[tasks.build]
+description = "Build mstore for the current platform"
+run = "mkdir -p bin && go build -trimpath -ldflags='-s -w' -o bin/mstore ./cmd/mstore"
+
+[tasks.build-all]
+description = "Build the static Linux amd64 binary"
+run = """
+mkdir -p dist
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o dist/mstore-linux-amd64 ./cmd/mstore
+"""
