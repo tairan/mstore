@@ -49,4 +49,4 @@ jobs:
           printf '%s\n' "$details"
           grep -Fq 'x86-64' <<<"$details"
           grep -Fq 'statically linked' <<<"$details"
-          test "$("$binary" --version)" = 'mstore dev'
+          test "$("$binary" --version)" = "mstore ${GITHUB_SHA:0:12}"
