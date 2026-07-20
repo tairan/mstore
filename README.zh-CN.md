@@ -101,10 +101,20 @@ rename。已存在且身份一致的版本会直接跳过。已发布的 version
 
 ```sh
 mstore scan --provider all --long
+mstore sync --dry-run
+mstore sync
 mstore import --activate hf:Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@COMMIT
-mstore import --all-new --provider ms
-mstore sync --activate
+mstore sync --activate qwen3-tts-12hz-1-7b-customvoice
 ```
+
+不指定模型参数时，`sync` 会扫描所有 provider 并导入全部 ready revision，
+包括从未导入过的仓库。可以用 `--provider hf|ms|all` 限定扫描范围。不存在的
+provider 缓存会被跳过，incomplete revision 会被忽略；单个模型失败不会阻止
+其他模型继续同步。名称冲突会直接失败，不会任意选择归属。
+
+只有显式指定 `--activate`，`sync` 才会修改 `current`。启用激活后，
+Hugging Face 按 `refs/main`、`refs/master` 的顺序选择，ModelScope 优先使用
+`.mv`；如果一个仓库只有一个 ready revision，则将其作为兜底选择。
 
 查看、激活和校验：
 
@@ -169,9 +179,8 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 主要命令参数：
 
 - `scan`：`--provider`、`--ready-only`、`--new-only`、`--long`
-- `import`：`--all-new`、`--name`、`--provider`、`--activate`、`--hash`、
-  `--jobs`、`--dry-run`
-- `sync`：`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `import`：`--name`、`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `sync`：`--provider`、`--activate`、`--hash`、`--jobs`、`--dry-run`
 - `list`：`--versions`、`--source`、`--long`
 - `show`：`--files`、`--hashes`
 - `path`：`--link`

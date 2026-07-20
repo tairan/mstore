@@ -8,6 +8,14 @@ import (
 	"github.com/chieworks/mstore/internal/source/modelscope"
 )
 
+type ScanError struct {
+	Provider string
+	Err      error
+}
+
+func (e ScanError) Error() string { return fmt.Sprintf("%s: %v", e.Provider, e.Err) }
+func (e ScanError) Unwrap() error { return e.Err }
+
 func Scan(provider string) ([]source.Model, []error) {
 	var models []source.Model
 	var errs []error
@@ -19,7 +27,7 @@ func Scan(provider string) ([]source.Model, []error) {
 			models = append(models, got...)
 		}
 		if err != nil {
-			errs = append(errs, fmt.Errorf("hf: %w", err))
+			errs = append(errs, ScanError{Provider: "hf", Err: err})
 		}
 	}
 	if provider == "all" || provider == "ms" {
@@ -30,7 +38,7 @@ func Scan(provider string) ([]source.Model, []error) {
 			models = append(models, got...)
 		}
 		if err != nil {
-			errs = append(errs, fmt.Errorf("ms: %w", err))
+			errs = append(errs, ScanError{Provider: "ms", Err: err})
 		}
 	}
 	return models, errs

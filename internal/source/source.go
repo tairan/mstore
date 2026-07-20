@@ -6,12 +6,13 @@ import (
 )
 
 type Model struct {
-	Provider string `json:"provider"`
-	Repo     string `json:"repo"`
-	Revision string `json:"revision"`
-	Path     string `json:"-"`
-	Status   string `json:"status"`
-	Error    string `json:"error,omitempty"`
+	Provider  string `json:"provider"`
+	Repo      string `json:"repo"`
+	Revision  string `json:"revision"`
+	Path      string `json:"-"`
+	Status    string `json:"status"`
+	Error     string `json:"error,omitempty"`
+	Preferred bool   `json:"-"`
 }
 
 func (m Model) Ref() string { return m.Provider + ":" + m.Repo + "@" + m.Revision }

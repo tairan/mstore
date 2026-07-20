@@ -22,7 +22,8 @@ func TestScanCurrentLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Revision != "abc123def456" || models[0].Status != "ready" {
+	if len(models) != 1 || models[0].Revision != "abc123def456" ||
+		models[0].Status != "ready" || !models[0].Preferred {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 }

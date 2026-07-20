@@ -64,6 +64,8 @@ func Scan(root string) ([]source.Model, error) {
 					m.Status, m.Error = "invalid", "invalid .mv revision"
 				} else if _, _, scanErr := fsutil.Scan(dir, false); scanErr != nil {
 					m.Status, m.Error = "invalid", scanErr.Error()
+				} else {
+					m.Preferred = true
 				}
 			}
 			out = append(out, m)
