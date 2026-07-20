@@ -2,6 +2,8 @@
 
 [English](README.md) | **简体中文**
 
+[![CI](https://github.com/tairan/mstore/actions/workflows/ci.yml/badge.svg)](https://github.com/tairan/mstore/actions/workflows/ci.yml)
+
 `mstore` 将 Hugging Face 或 ModelScope 原生缓存中已经下载完成的模型发布到
 便携、不可变的本地模型仓库。它不会下载模型，也不会写入 provider 缓存。
 
@@ -24,6 +26,27 @@ mise run build
 运行时。
 
 可用任务包括 `fmt`、`lint`、`test`、`check`、`build` 和 `build-all`。
+
+## 持续集成与发布
+
+GitHub Actions 会在 pull request、推送到 `main` 以及手动触发时运行
+`mise run check`，并构建静态 Linux amd64 二进制。
+
+推送严格遵循 [SemVer](https://semver.org/lang/zh-CN/) 的标签即可创建
+GitHub Release：
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+`v1.2.3-rc.1` 等预发布标签会创建 prerelease。每个 Release 包含
+`mstore-linux-amd64` 和 `mstore-linux-amd64.sha256`，并将版本号写入
+二进制。本地构建时也可以通过 `MSTORE_VERSION` 设置内嵌版本：
+
+```sh
+MSTORE_VERSION=v1.2.3 mise run build-all
+```
 
 ## Provider 缓存
 

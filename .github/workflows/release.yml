@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MSTORE_VERSION: ${{ github.ref_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+        with:
+          version: 2026.7.7
+          install: true
+          cache: true
+
+      - name: Validate SemVer tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          semver='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$'
+          if [[ ! "$tag" =~ $semver ]]; then
+            echo "invalid SemVer release tag: $tag" >&2
+            exit 1
+          fi
+
+          without_build="${tag%%+*}"
+          prerelease=""
+          if [[ "$without_build" == *-* ]]; then
+            prerelease="${without_build#*-}"
+            IFS='.' read -ra identifiers <<<"$prerelease"
+            for identifier in "${identifiers[@]}"; do
+              if [[ "$identifier" =~ ^[0-9]+$ && ${#identifier} -gt 1 && "$identifier" == 0* ]]; then
+                echo "numeric prerelease identifier has a leading zero: $identifier" >&2
+                exit 1
+              fi
+            done
+            echo "prerelease=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Check
+        run: mise run check
+
+      - name: Build release
+        run: mise run build-all
+
+      - name: Validate release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=dist/mstore-linux-amd64
+          test -x "$binary"
+          test "$("$binary" --version)" = "mstore $GITHUB_REF_NAME"
+
+          details="$(file "$binary")"
+          printf '%s\n' "$details"
+          grep -Fq 'x86-64' <<<"$details"
+          grep -Fq 'statically linked' <<<"$details"
+
+          (
+            cd dist
+            sha256sum mstore-linux-amd64 >mstore-linux-amd64.sha256
+            sha256sum --check mstore-linux-amd64.sha256
+          )
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          IS_PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          assets=(
+            dist/mstore-linux-amd64
+            dist/mstore-linux-amd64.sha256
+          )
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${assets[@]}" --clobber
+            exit 0
+          fi
+
+          args=(
+            "$tag"
+            "${assets[@]}"
+            --verify-tag
+            --generate-notes
+            --title "$tag"
+          )
+          if [[ "$IS_PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh release create "${args[@]}"

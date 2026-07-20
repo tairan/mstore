@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install mise tools
+        uses: jdx/mise-action@dad1bfd3df957f44999b559dd69dc1671cb4e9ea # v4.2.1
+        with:
+          version: 2026.7.7
+          install: true
+          cache: true
+
+      - name: Check
+        run: mise run check
+
+      - name: Build Linux amd64
+        run: mise run build-all
+
+      - name: Validate binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary=dist/mstore-linux-amd64
+          test -x "$binary"
+          details="$(file "$binary")"
+          printf '%s\n' "$details"
+          grep -Fq 'x86-64' <<<"$details"
+          grep -Fq 'statically linked' <<<"$details"
+          test "$("$binary" --version)" = 'mstore dev'

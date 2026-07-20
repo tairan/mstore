@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+[![CI](https://github.com/tairan/mstore/actions/workflows/ci.yml/badge.svg)](https://github.com/tairan/mstore/actions/workflows/ci.yml)
+
 `mstore` publishes models that are already present in the native Hugging Face
 or ModelScope cache into a portable, immutable local model store. It never
 downloads models and never writes to provider caches.
@@ -26,6 +28,27 @@ builds are not supported. Builds set `CGO_ENABLED=0`; mstore has no Python,
 rsync, database, daemon, or CGO runtime dependency.
 
 Available tasks are `fmt`, `lint`, `test`, `check`, `build`, and `build-all`.
+
+## Continuous integration and releases
+
+GitHub Actions runs `mise run check` and builds the static Linux amd64 binary
+for pull requests, pushes to `main`, and manual workflow runs.
+
+Push a strict [SemVer](https://semver.org/) tag to create a GitHub Release:
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Prerelease tags such as `v1.2.3-rc.1` create prereleases. Each release contains
+`mstore-linux-amd64` and `mstore-linux-amd64.sha256`; the version is embedded
+in the binary. `MSTORE_VERSION` can also set the embedded version during a
+local build:
+
+```sh
+MSTORE_VERSION=v1.2.3 mise run build-all
+```
 
 ## Provider caches
 
