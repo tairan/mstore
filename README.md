@@ -107,10 +107,22 @@ Scan the native caches and publish completed revisions:
 
 ```sh
 mstore scan --provider all --long
+mstore sync --dry-run
+mstore sync
 mstore import --activate hf:Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@COMMIT
-mstore import --all-new --provider ms
-mstore sync --activate
+mstore sync --activate qwen3-tts-12hz-1-7b-customvoice
 ```
+
+With no model arguments, `sync` scans every provider and imports every ready
+revision, including repositories that have never been imported before. Use
+`--provider hf|ms|all` to restrict discovery. Missing provider caches are
+skipped, incomplete revisions are ignored, and one failed model does not stop
+the others. Name conflicts fail without choosing an arbitrary owner.
+
+`sync` does not change `current` unless `--activate` is supplied. With
+activation enabled, Hugging Face prefers `refs/main` then `refs/master`, and
+ModelScope prefers `.mv`; a repository with exactly one ready revision uses
+that revision as a fallback.
 
 Inspect, activate, and verify:
 
@@ -178,9 +190,8 @@ Provider references use `hf:namespace/repo[@revision]` or
 Important command options:
 
 - `scan`: `--provider`, `--ready-only`, `--new-only`, `--long`
-- `import`: `--all-new`, `--name`, `--provider`, `--activate`, `--hash`,
-  `--jobs`, `--dry-run`
-- `sync`: `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `import`: `--name`, `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `sync`: `--provider`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `list`: `--versions`, `--source`, `--long`
 - `show`: `--files`, `--hashes`
 - `path`: `--link`

@@ -15,6 +15,7 @@ import (
 	"github.com/chieworks/mstore/internal/fsutil"
 	"github.com/chieworks/mstore/internal/naming"
 	"github.com/chieworks/mstore/internal/providers"
+	"github.com/chieworks/mstore/internal/reconcile"
 	"github.com/chieworks/mstore/internal/source"
 	"github.com/chieworks/mstore/internal/store"
 )
@@ -217,9 +218,7 @@ func (a *app) scan(args []string) error {
 
 func (a *app) importModels(args []string) error {
 	f := newFlags("import")
-	allNew := f.Bool("all-new", false, "")
 	name := f.String("name", "", "")
-	provider := f.String("provider", "all", "")
 	activate := f.Bool("activate", false, "")
 	hash := f.Bool("hash", false, "")
 	jobs := f.Int("jobs", 1, "")
@@ -231,37 +230,23 @@ func (a *app) importModels(args []string) error {
 		return usageError("--jobs must be at least 1")
 	}
 	refs := f.Args()
-	if (*allNew && len(refs) > 0) || (!*allNew && len(refs) == 0) {
-		return usageError("provide SOURCE... or --all-new")
+	if len(refs) == 0 {
+		return usageError("provide SOURCE...")
 	}
-	if *name != "" && (len(refs) != 1 || *allNew) {
+	if *name != "" && len(refs) != 1 {
 		return usageError("--name is only valid with one source")
 	}
 	var models []source.Model
-	if *allNew {
-		if err := validProvider(*provider); err != nil {
+	for _, raw := range refs {
+		r, err := source.ParseRef(raw)
+		if err != nil {
+			return usageError("%s: %v", raw, err)
+		}
+		m, err := providers.Resolve(r)
+		if err != nil {
 			return err
 		}
-		scanned, _ := providers.Scan(*provider)
-		versions, _ := a.store.List("")
-		for _, m := range scanned {
-			if m.Status != "ready" || identityExists(versions, m) {
-				continue
-			}
-			models = append(models, m)
-		}
-	} else {
-		for _, raw := range refs {
-			r, err := source.ParseRef(raw)
-			if err != nil {
-				return usageError("%s: %v", raw, err)
-			}
-			m, err := providers.Resolve(r)
-			if err != nil {
-				return err
-			}
-			models = append(models, m)
-		}
+		models = append(models, m)
 	}
 	var results []store.ImportResult
 	for _, m := range models {
@@ -276,6 +261,7 @@ func (a *app) importModels(args []string) error {
 
 func (a *app) sync(args []string) error {
 	f := newFlags("sync")
+	provider := f.String("provider", "all", "")
 	activate := f.Bool("activate", false, "")
 	hash := f.Bool("hash", false, "")
 	jobs := f.Int("jobs", 1, "")
@@ -283,38 +269,60 @@ func (a *app) sync(args []string) error {
 	if err := f.Parse(args); err != nil {
 		return usageError("%v", err)
 	}
-	if *jobs < 1 {
-		return usageError("--jobs must be at least 1")
-	}
-	requested := map[string]bool{}
-	for _, name := range f.Args() {
-		requested[name] = true
-	}
-	existing, err := a.store.List("")
-	if err != nil {
+	if err := validProvider(*provider); err != nil {
 		return err
 	}
-	type identity struct{ provider, repo, name string }
-	registered := map[identity]bool{}
-	for _, v := range existing {
-		if len(requested) == 0 || requested[v.Name] {
-			registered[identity{v.Manifest.Source.Provider, v.Manifest.Source.Repo, v.Name}] = true
-		}
+	report, syncErr := reconcile.Run(a.store, providers.Scan, reconcile.Options{
+		Provider: *provider,
+		Models:   f.Args(),
+		Activate: *activate,
+		Hash:     *hash,
+		Jobs:     *jobs,
+		DryRun:   *dryRun,
+	})
+	var selectionErr reconcile.SelectionError
+	if errors.As(syncErr, &selectionErr) {
+		return usageError("%v", selectionErr)
 	}
-	scanned, _ := providers.Scan("all")
-	var results []store.ImportResult
-	for _, m := range scanned {
-		for id := range registered {
-			if m.Status == "ready" && m.Provider == id.provider && m.Repo == id.repo && !identityExists(existing, m) {
-				res, err := a.store.Import(m, store.ImportOptions{Name: id.name, Activate: *activate, Hash: *hash, DryRun: *dryRun})
-				if err != nil {
-					return err
-				}
-				results = append(results, res)
+	if err := a.printSyncReport(report); err != nil {
+		return err
+	}
+	return syncErr
+}
+
+func (a *app) printSyncReport(report reconcile.Report) error {
+	if a.global.json {
+		return writeJSON(a.out, report)
+	}
+	if a.global.quiet {
+		return nil
+	}
+	for _, item := range report.Results {
+		if item.Status == "skipped" && a.global.verbose == 0 {
+			continue
+		}
+		target := item.Source
+		if item.Name != "" {
+			target = item.Name
+			if item.Version != "" {
+				target += "@" + item.Version
 			}
 		}
+		fmt.Fprintf(a.out, "%-9s %-8s %s", item.Status, item.Operation, target)
+		if item.Path != "" {
+			fmt.Fprintf(a.out, " -> %s", item.Path)
+		}
+		if item.Error != "" {
+			fmt.Fprintf(a.out, ": %s", item.Error)
+		}
+		fmt.Fprintln(a.out)
 	}
-	return a.printImportResults(results)
+	fmt.Fprintf(a.out,
+		"summary: planned=%d imported=%d skipped=%d activated=%d conflict=%d failed=%d\n",
+		report.Summary.Planned, report.Summary.Imported, report.Summary.Skipped,
+		report.Summary.Activated, report.Summary.Conflict, report.Summary.Failed,
+	)
+	return nil
 }
 
 func (a *app) printImportResults(results []store.ImportResult) error {
@@ -667,7 +675,7 @@ Usage:
 Commands:
   scan      inspect Hugging Face and ModelScope caches
   import    publish one or more cached sources
-  sync      publish new revisions of registered models
+  sync      publish all ready cached revisions
   list, ls  list stored models and versions
   show      show a model manifest
   path      print a model's physical path
@@ -702,6 +710,10 @@ func exitCode(err error) int {
 	var usage cliError
 	if errors.As(err, &usage) {
 		return 2
+	}
+	var scanErr providers.ScanError
+	if errors.As(err, &scanErr) {
+		return 3
 	}
 	s := strings.ToLower(err.Error())
 	switch {
@@ -739,15 +751,6 @@ func errorsToStrings(errs []error) []string {
 		out[i] = err.Error()
 	}
 	return out
-}
-
-func identityExists(versions []store.Version, m source.Model) bool {
-	for _, v := range versions {
-		if v.Manifest.Source.Provider == m.Provider && v.Manifest.Source.Repo == m.Repo && v.Manifest.Source.Revision == m.Revision {
-			return true
-		}
-	}
-	return false
 }
 
 func buildVersion() string {

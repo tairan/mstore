@@ -88,4 +88,21 @@ func TestResolveNamedRef(t *testing.T) {
 	if err != nil || m.Revision != "abcdef1234567890" {
 		t.Fatalf("resolve ref: %#v %v", m, err)
 	}
+	models, err := Scan(root)
+	if err != nil || len(models) != 1 || !models[0].Preferred {
+		t.Fatalf("preferred revision: %#v %v", models, err)
+	}
+}
+
+func TestPreferredRevisionFallsBackToMaster(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "refs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "refs", "master"), []byte("master-revision\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := preferredRevision(repo); got != "master-revision" {
+		t.Fatalf("preferred revision = %q", got)
+	}
 }

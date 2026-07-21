@@ -1,6 +1,7 @@
 package modelscope
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -22,7 +23,8 @@ func TestScanCurrentLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Revision != "abc123def456" || models[0].Status != "ready" {
+	if len(models) != 1 || models[0].Revision != "abc123def456" ||
+		models[0].Status != "ready" || !models[0].Preferred {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 }
@@ -45,5 +47,13 @@ func TestScanRejectsOldRootAndMissingMV(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].Status != "incomplete" {
 		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
+func TestScanMissingModelsDirectoryPreservesNotExist(t *testing.T) {
+	base := t.TempDir()
+	_, err := Scan(filepath.Join(base, "models"))
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected not-exist error, got %v", err)
 	}
 }

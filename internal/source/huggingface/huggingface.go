@@ -48,11 +48,16 @@ func Scan(root string) ([]source.Model, error) {
 			out = append(out, source.Model{Provider: "hf", Repo: repo, Status: "incomplete", Error: "missing snapshots"})
 			continue
 		}
+		preferred := preferredRevision(filepath.Join(root, repoDir.Name()))
 		for _, rev := range revisions {
 			if !rev.IsDir() || rev.Name() == "" {
 				continue
 			}
-			m := source.Model{Provider: "hf", Repo: repo, Revision: rev.Name(), Path: filepath.Join(snapshots, rev.Name()), Status: "ready"}
+			m := source.Model{
+				Provider: "hf", Repo: repo, Revision: rev.Name(),
+				Path: filepath.Join(snapshots, rev.Name()), Status: "ready",
+				Preferred: rev.Name() == preferred,
+			}
 			if scanErr := validateSnapshot(m.Path, filepath.Join(root, repoDir.Name())); scanErr != nil {
 				m.Status, m.Error = "invalid", scanErr.Error()
 			}
@@ -61,6 +66,20 @@ func Scan(root string) ([]source.Model, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref() < out[j].Ref() })
 	return out, nil
+}
+
+func preferredRevision(repoRoot string) string {
+	for _, ref := range []string{"main", "master"} {
+		b, err := os.ReadFile(filepath.Join(repoRoot, "refs", ref))
+		if err != nil {
+			continue
+		}
+		revision := strings.TrimSpace(string(b))
+		if revision != "" && !strings.ContainsAny(revision, `/\`) {
+			return revision
+		}
+	}
+	return ""
 }
 
 func validateSnapshot(snapshot, repoRoot string) error {
