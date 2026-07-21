@@ -711,6 +711,10 @@ func exitCode(err error) int {
 	if errors.As(err, &usage) {
 		return 2
 	}
+	var scanErr providers.ScanError
+	if errors.As(err, &scanErr) {
+		return 3
+	}
 	s := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(s, "lock timeout"):

@@ -3,10 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/chieworks/mstore/internal/providers"
+	"github.com/chieworks/mstore/internal/reconcile"
 )
 
 func TestCLIImportPathAndJSON(t *testing.T) {
@@ -50,6 +54,16 @@ func TestCLIUsageExitCode(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run([]string{"unknown"}, &out, &errOut); code != 2 {
 		t.Fatalf("code = %d", code)
+	}
+}
+
+func TestExitCodeClassifiesProviderScanFailure(t *testing.T) {
+	err := &reconcile.RunError{
+		Failed: 1,
+		Cause:  providers.ScanError{Provider: "hf", Err: errors.New("open /models: permission denied")},
+	}
+	if got := exitCode(err); got != 3 {
+		t.Fatalf("exit code = %d", got)
 	}
 }
 

@@ -87,6 +87,11 @@ type identity struct {
 	revision string
 }
 
+type namedIdentity struct {
+	identity
+	name string
+}
+
 type candidate struct {
 	model   source.Model
 	key     repoKey
@@ -114,24 +119,33 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 		return report, err
 	}
 
-	namesByRepo := map[repoKey]string{}
+	namesByRepo := map[repoKey][]string{}
+	seenName := map[repoKey]map[string]bool{}
 	reposByName := map[string]repoKey{}
-	versionsByIdentity := map[identity]string{}
+	versionsByIdentity := map[namedIdentity]string{}
 	for _, version := range existing {
 		key := repoKey{provider: version.Manifest.Source.Provider, repo: version.Manifest.Source.Repo}
-		if prior, ok := namesByRepo[key]; ok && prior != version.Name {
-			return report, fmt.Errorf("source %s:%s is registered under multiple names", key.provider, key.repo)
-		}
 		if prior, ok := reposByName[version.Name]; ok && prior != key {
 			return report, fmt.Errorf("model name %q contains multiple source identities", version.Name)
 		}
-		namesByRepo[key] = version.Name
+		if seenName[key] == nil {
+			seenName[key] = map[string]bool{}
+		}
+		if !seenName[key][version.Name] {
+			namesByRepo[key] = append(namesByRepo[key], version.Name)
+			seenName[key][version.Name] = true
+		}
 		reposByName[version.Name] = key
-		versionsByIdentity[identity{repoKey: key, revision: version.Manifest.Source.Revision}] = version.Version
+		versionsByIdentity[namedIdentity{
+			identity: identity{repoKey: key, revision: version.Manifest.Source.Revision},
+			name:     version.Name,
+		}] = version.Version
+	}
+	for key := range namesByRepo {
+		sort.Strings(namesByRepo[key])
 	}
 
 	requested := make(map[string]bool, len(opts.Models))
-	selectedRepos := map[repoKey]bool{}
 	for _, name := range opts.Models {
 		requested[name] = true
 		key, ok := reposByName[name]
@@ -141,7 +155,6 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 		if opts.Provider != "all" && key.provider != opts.Provider {
 			return report, SelectionError{Message: fmt.Sprintf("model %q uses provider %s, excluded by --provider %s", name, key.provider, opts.Provider)}
 		}
-		selectedRepos[key] = true
 	}
 
 	models, scanErrs := scan(opts.Provider)
@@ -175,37 +188,44 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 			continue
 		}
 		key := repoKey{provider: model.Provider, repo: model.Repo}
-		if len(requested) > 0 && !selectedRepos[key] {
-			continue
-		}
 		id := identity{repoKey: key, revision: model.Revision}
 		if seenIdentity[id] {
 			continue
 		}
 		seenIdentity[id] = true
-		name := namesByRepo[key]
-		if name == "" {
-			name, err = naming.Normalize(model.Repo)
-			if err != nil {
-				report.Results = append(report.Results, Item{
-					Operation: "import", Status: "failed", Source: model.Ref(), Error: err.Error(),
-				})
-				if firstFailure == nil {
-					firstFailure = err
-				}
+		names := namesByRepo[key]
+		if len(requested) > 0 {
+			names = selectedNames(names, requested)
+			if len(names) == 0 {
 				continue
 			}
 		}
-		candidates = append(candidates, candidate{
-			model: model, key: key, name: name, version: versionsByIdentity[id],
-		})
+		if len(names) == 0 {
+			name, normalizeErr := naming.Normalize(model.Repo)
+			if normalizeErr != nil {
+				report.Results = append(report.Results, Item{
+					Operation: "import", Status: "failed", Source: model.Ref(), Error: normalizeErr.Error(),
+				})
+				if firstFailure == nil {
+					firstFailure = normalizeErr
+				}
+				continue
+			}
+			names = []string{name}
+		}
+		for _, name := range names {
+			candidates = append(candidates, candidate{
+				model: model, key: key, name: name,
+				version: versionsByIdentity[namedIdentity{identity: id, name: name}],
+			})
+		}
 	}
 
 	conflicted := preflightConflicts(candidates, reposByName)
-	repoCandidates := map[repoKey][]candidate{}
+	modelCandidates := map[string][]candidate{}
 	var imports []candidate
 	for _, candidate := range candidates {
-		repoCandidates[candidate.key] = append(repoCandidates[candidate.key], candidate)
+		modelCandidates[candidate.name] = append(modelCandidates[candidate.name], candidate)
 		if message := conflicted[candidate.key]; message != "" {
 			report.Results = append(report.Results, Item{
 				Operation: "import", Status: "conflict", Source: candidate.model.Ref(),
@@ -233,24 +253,22 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 			}
 			continue
 		}
-		versionsByIdentity[identity{repoKey: outcome.candidate.key, revision: outcome.candidate.model.Revision}] = outcome.version
+		versionsByIdentity[namedIdentity{
+			identity: identity{repoKey: outcome.candidate.key, revision: outcome.candidate.model.Revision},
+			name:     outcome.candidate.name,
+		}] = outcome.version
 	}
 
 	if opts.Activate {
-		keys := make([]repoKey, 0, len(repoCandidates))
-		for key := range repoCandidates {
-			if conflicted[key] == "" {
-				keys = append(keys, key)
+		names := make([]string, 0, len(modelCandidates))
+		for name, candidates := range modelCandidates {
+			if conflicted[candidates[0].key] == "" {
+				names = append(names, name)
 			}
 		}
-		sort.Slice(keys, func(i, j int) bool {
-			if keys[i].provider == keys[j].provider {
-				return keys[i].repo < keys[j].repo
-			}
-			return keys[i].provider < keys[j].provider
-		})
-		for _, key := range keys {
-			item, activateErr := activate(repo, key, repoCandidates[key], versionsByIdentity, opts.DryRun)
+		sort.Strings(names)
+		for _, name := range names {
+			item, activateErr := activate(repo, name, modelCandidates[name], versionsByIdentity, opts.DryRun)
 			report.Results = append(report.Results, item)
 			if activateErr != nil && firstFailure == nil {
 				firstFailure = activateErr
@@ -260,6 +278,9 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 
 	sort.SliceStable(report.Results, func(i, j int) bool {
 		if report.Results[i].Source == report.Results[j].Source {
+			if report.Results[i].Name != report.Results[j].Name {
+				return report.Results[i].Name < report.Results[j].Name
+			}
 			return operationOrder(report.Results[i].Operation) < operationOrder(report.Results[j].Operation)
 		}
 		return report.Results[i].Source < report.Results[j].Source
@@ -271,6 +292,16 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 		}
 	}
 	return report, nil
+}
+
+func selectedNames(names []string, requested map[string]bool) []string {
+	selected := make([]string, 0, len(names))
+	for _, name := range names {
+		if requested[name] {
+			selected = append(selected, name)
+		}
+	}
+	return selected
 }
 
 func preflightConflicts(candidates []candidate, existing map[string]repoKey) map[repoKey]string {
@@ -308,41 +339,33 @@ func importAll(repo Repository, candidates []candidate, opts Options) []importOu
 	if len(candidates) == 0 {
 		return nil
 	}
-	jobs := min(opts.Jobs, len(candidates))
-	input := make(chan candidate)
+	groupsByName := map[string][]candidate{}
+	for _, candidate := range candidates {
+		groupsByName[candidate.name] = append(groupsByName[candidate.name], candidate)
+	}
+	names := make([]string, 0, len(groupsByName))
+	for name := range groupsByName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	jobs := min(opts.Jobs, len(names))
+	input := make(chan []candidate)
 	output := make(chan importOutcome, len(candidates))
 	var workers sync.WaitGroup
 	for range jobs {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for candidate := range input {
-				result, err := repo.Import(candidate.model, store.ImportOptions{
-					Name: candidate.name, Hash: opts.Hash, DryRun: opts.DryRun,
-				})
-				item := Item{
-					Operation: "import", Source: candidate.model.Ref(), Name: candidate.name,
-					Version: result.Version, Path: result.Path,
-				}
-				switch {
-				case err != nil:
-					item.Status, item.Error = "failed", err.Error()
-				case opts.DryRun:
-					item.Status = "planned"
-				case result.Skipped:
-					item.Status = "skipped"
-				default:
-					item.Status = "imported"
-				}
-				output <- importOutcome{
-					candidate: candidate, item: item, version: result.Version, err: err,
+			for group := range input {
+				for _, candidate := range group {
+					output <- importOne(repo, candidate, opts)
 				}
 			}
 		}()
 	}
 	go func() {
-		for _, candidate := range candidates {
-			input <- candidate
+		for _, name := range names {
+			input <- groupsByName[name]
 		}
 		close(input)
 		workers.Wait()
@@ -353,13 +376,38 @@ func importAll(repo Repository, candidates []candidate, opts Options) []importOu
 		outcomes = append(outcomes, outcome)
 	}
 	sort.Slice(outcomes, func(i, j int) bool {
+		if outcomes[i].candidate.model.Ref() == outcomes[j].candidate.model.Ref() {
+			return outcomes[i].candidate.name < outcomes[j].candidate.name
+		}
 		return outcomes[i].candidate.model.Ref() < outcomes[j].candidate.model.Ref()
 	})
 	return outcomes
 }
 
-func activate(repo Repository, key repoKey, candidates []candidate, versions map[identity]string, dryRun bool) (Item, error) {
-	item := Item{Operation: "activate", Source: key.provider + ":" + key.repo}
+func importOne(repo Repository, candidate candidate, opts Options) importOutcome {
+	result, err := repo.Import(candidate.model, store.ImportOptions{
+		Name: candidate.name, Hash: opts.Hash, DryRun: opts.DryRun,
+	})
+	item := Item{
+		Operation: "import", Source: candidate.model.Ref(), Name: candidate.name,
+		Version: result.Version, Path: result.Path,
+	}
+	switch {
+	case err != nil:
+		item.Status, item.Error = "failed", err.Error()
+	case opts.DryRun:
+		item.Status = "planned"
+	case result.Skipped:
+		item.Status = "skipped"
+	default:
+		item.Status = "imported"
+	}
+	return importOutcome{candidate: candidate, item: item, version: result.Version, err: err}
+}
+
+func activate(repo Repository, name string, candidates []candidate, versions map[namedIdentity]string, dryRun bool) (Item, error) {
+	key := candidates[0].key
+	item := Item{Operation: "activate", Source: key.provider + ":" + key.repo, Name: name}
 	preferred := make([]candidate, 0, 1)
 	for _, candidate := range candidates {
 		if candidate.model.Preferred {
@@ -382,8 +430,9 @@ func activate(repo Repository, key repoKey, candidates []candidate, versions map
 		return item, err
 	}
 	item.Source = target.model.Ref()
-	item.Name = target.name
-	item.Version = versions[identity{repoKey: key, revision: target.model.Revision}]
+	item.Version = versions[namedIdentity{
+		identity: identity{repoKey: key, revision: target.model.Revision}, name: name,
+	}]
 	if item.Version == "" {
 		err := fmt.Errorf("provider-current revision was not published for %s", target.model.Ref())
 		item.Status, item.Error = "failed", err.Error()

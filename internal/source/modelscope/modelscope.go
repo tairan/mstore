@@ -34,10 +34,6 @@ func Scan(root string) ([]source.Model, error) {
 	}
 	namespaces, err := os.ReadDir(root)
 	if err != nil {
-		parent := filepath.Dir(root)
-		if old, statErr := os.Stat(parent); statErr == nil && old.IsDir() {
-			return nil, fmt.Errorf("unsupported ModelScope cache layout or models directory missing: %s", root)
-		}
 		return nil, err
 	}
 	var out []source.Model

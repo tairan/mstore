@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -115,6 +116,35 @@ func TestRegisteredNameIsReusedAndSelectionValidated(t *testing.T) {
 	var selectionErr SelectionError
 	if !errors.As(err, &selectionErr) {
 		t.Fatalf("expected selection error, got %v", err)
+	}
+}
+
+func TestSourceAliasesAreReconciledIndependently(t *testing.T) {
+	repository, _ := store.Open(t.TempDir())
+	old := modelFixture(t, "hf", "Acme/Widget", "111111111111aaaa")
+	for _, name := range []string{"widget-a", "widget-b"} {
+		if _, err := repository.Import(old, store.ImportOptions{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := modelFixture(t, "hf", "Acme/Widget", "222222222222bbbb")
+	report, err := Run(repository, scanner([]source.Model{next}), Options{Provider: "all", Jobs: 2})
+	if err != nil || report.Summary.Imported != 2 {
+		t.Fatalf("alias report: %#v, %v", report, err)
+	}
+
+	third := modelFixture(t, "hf", "Acme/Widget", "333333333333cccc")
+	report, err = Run(repository, scanner([]source.Model{third}), Options{
+		Provider: "all", Models: []string{"widget-a"}, Jobs: 2,
+	})
+	if err != nil || report.Summary.Imported != 1 || report.Results[0].Name != "widget-a" {
+		t.Fatalf("selected alias report: %#v, %v", report, err)
+	}
+	for name, want := range map[string]int{"widget-a": 3, "widget-b": 2} {
+		versions, listErr := repository.List(name)
+		if listErr != nil || len(versions) != want {
+			t.Fatalf("%s versions: %#v, %v", name, versions, listErr)
+		}
 	}
 }
 
@@ -281,6 +311,63 @@ func TestJobsControlsConcurrency(t *testing.T) {
 	for i := 1; i < len(report.Results); i++ {
 		if report.Results[i-1].Source > report.Results[i].Source {
 			t.Fatalf("results are not sorted: %#v", report.Results)
+		}
+	}
+}
+
+type serialByNameRepository struct {
+	mu           sync.Mutex
+	activeByName map[string]int
+	maxByName    map[string]int
+	activeTotal  int
+	maxTotal     int
+}
+
+func (r *serialByNameRepository) List(string) ([]store.Version, error) { return nil, nil }
+
+func (r *serialByNameRepository) Import(src source.Model, opts store.ImportOptions) (store.ImportResult, error) {
+	r.mu.Lock()
+	if r.activeByName == nil {
+		r.activeByName = map[string]int{}
+		r.maxByName = map[string]int{}
+	}
+	r.activeByName[opts.Name]++
+	r.activeTotal++
+	r.maxByName[opts.Name] = max(r.maxByName[opts.Name], r.activeByName[opts.Name])
+	r.maxTotal = max(r.maxTotal, r.activeTotal)
+	r.mu.Unlock()
+
+	time.Sleep(20 * time.Millisecond)
+
+	r.mu.Lock()
+	r.activeByName[opts.Name]--
+	r.activeTotal--
+	r.mu.Unlock()
+	return store.ImportResult{Name: opts.Name, Version: src.Revision, Path: src.Path}, nil
+}
+
+func (r *serialByNameRepository) Activate(string, bool) error { return nil }
+
+func TestRevisionsSharingModelNameAreSerialized(t *testing.T) {
+	models := []source.Model{
+		modelFixture(t, "hf", "Acme/Widget", "111111111111aaaa"),
+		modelFixture(t, "hf", "Acme/Widget", "222222222222bbbb"),
+		modelFixture(t, "hf", "Acme/Speaker", "333333333333cccc"),
+		modelFixture(t, "hf", "Acme/Speaker", "444444444444dddd"),
+	}
+	repository := &serialByNameRepository{}
+	report, err := Run(repository, scanner(models), Options{Provider: "all", Jobs: 4})
+	if err != nil || report.Summary.Imported != len(models) {
+		t.Fatalf("serialized report: %#v, %v", report, err)
+	}
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	if repository.maxTotal < 2 {
+		t.Fatalf("different names did not run concurrently: max=%d", repository.maxTotal)
+	}
+	for name, got := range repository.maxByName {
+		if got != 1 {
+			t.Fatalf("%s max concurrency = %d", name, got)
 		}
 	}
 }
