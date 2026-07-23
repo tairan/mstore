@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chieworks/mstore/internal/fsutil"
 	"github.com/chieworks/mstore/internal/source"
 	"github.com/chieworks/mstore/internal/store"
 )
@@ -134,7 +135,15 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		if _, err := source.ParseRef(src.Provider + ":" + src.Repo + "@" + src.Revision); err != nil {
 			return plan, fmt.Errorf("%s@%s: invalid source in manifest: %w", v.Name, v.Version, err)
 		}
-		command, err := downloadCommand(src.Provider, src.Repo, src.Revision, opts)
+		var files []string
+		var err error
+		if src.Provider == "hf" {
+			files, err = storedFiles(v)
+			if err != nil {
+				return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
+			}
+		}
+		command, err := downloadCommand(src.Provider, src.Repo, src.Revision, files, opts)
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
@@ -178,17 +187,40 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 	}
 	b.WriteString("# Authenticate with Hugging Face or ModelScope first when a model is private or gated.\n")
 	b.WriteString("set -euo pipefail\n")
+	needsStore := false
+	for _, command := range commands {
+		needsStore = needsStore || command.SyncAfter
+	}
+	if needsStore {
+		b.WriteString("# Set MSTORE_STORE to the destination store when preserving multiple ModelScope revisions.\n")
+		b.WriteString("MSTORE_STORE=\"${MSTORE_STORE:-${MSTORE_HOME:-$HOME/models}}\"\n")
+	}
 	for _, command := range commands {
 		b.WriteString("\n")
 		b.WriteString(command.Command)
 		if command.SyncAfter {
 			b.WriteString("\n# Preserve this ModelScope revision before downloading the next one.\n")
-			b.WriteString("mstore sync --provider ms")
+			b.WriteString("mstore --store \"$MSTORE_STORE\" sync --provider ms")
 		}
 		b.WriteString("\n")
 	}
 	plan.Script = b.String()
 	return plan, nil
+}
+
+func storedFiles(v store.Version) ([]string, error) {
+	files, _, err := fsutil.Scan(v.Path, false)
+	if err != nil {
+		return nil, fmt.Errorf("scan stored files: %w", err)
+	}
+	if len(files) != v.Manifest.Files {
+		return nil, fmt.Errorf("stored file inventory changed: manifest has %d files, found %d", v.Manifest.Files, len(files))
+	}
+	paths := make([]string, len(files))
+	for i, file := range files {
+		paths[i] = file.Path
+	}
+	return paths, nil
 }
 
 func isImmutableModelScopeRevision(revision string) bool {
@@ -203,11 +235,15 @@ func isImmutableModelScopeRevision(revision string) bool {
 	return true
 }
 
-func downloadCommand(provider, repo, revision string, opts downloadScriptOptions) (string, error) {
+func downloadCommand(provider, repo, revision string, files []string, opts downloadScriptOptions) (string, error) {
 	var command string
 	switch provider {
 	case "hf":
-		command = "hf download " + shellQuote(repo) + " --revision " + shellQuote(revision)
+		command = "hf download " + shellQuote(repo)
+		for _, file := range files {
+			command += " " + shellQuote(file)
+		}
+		command += " --revision " + shellQuote(revision)
 		if opts.UseUV {
 			command = "uvx --from huggingface_hub " + command
 		}

@@ -189,9 +189,11 @@ provider/repository/revision combinations are
 emitted once. When multiple revisions of one ModelScope repository are selected,
 the script runs `mstore sync --provider ms` after each download so the single
 ModelScope cache directory does not overwrite an earlier revision; `mstore`
-must be available on `PATH`. Non-commit ModelScope revisions are marked with a
-warning because they may move before the script runs. `--json` returns the
-selected models and generated script as a single JSON value.
+must be available on `PATH`. Set `MSTORE_STORE=/destination` when the target
+store is not the default. Non-commit ModelScope revisions are marked with a
+warning because they may move before the script runs. Hugging Face commands
+include the published file inventory so partial snapshots are not expanded.
+`--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:
 

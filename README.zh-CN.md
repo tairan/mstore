@@ -176,7 +176,9 @@ provider、仓库和 revision 只会生成一条下载命令。`--json` 会输�
 生成脚本组成的一个 JSON 值。同一个 ModelScope 仓库选择多个 revision 时，
 脚本会在每次下载后执行 `mstore sync --provider ms`，避免单一 ModelScope
 缓存目录覆盖之前的 revision；目标机器需保证 `mstore` 在 `PATH` 中。非提交
-ID 的 ModelScope revision 会附带警告，因为脚本执行前它可能发生变化。
+ID 的 ModelScope revision 会附带警告，因为脚本执行前它可能发生变化。目标
+仓库不是默认路径时可设置 `MSTORE_STORE=/destination`。Hugging Face 命令会
+携带已发布的文件清单，避免把部分 snapshot 扩展为完整仓库。
 
 维护命令：
 
