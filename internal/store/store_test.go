@@ -53,8 +53,12 @@ func TestImportIsIdempotentAndDereferences(t *testing.T) {
 		t.Fatal("published provider symlink was not dereferenced")
 	}
 	got, err := s.Resolve("fancy-model")
-	if err != nil || got.Path != first.Path {
+	if err != nil || got.Path != first.Path || !got.Current {
 		t.Fatalf("resolve: %#v, %v", got, err)
+	}
+	got, err = s.Resolve("fancy-model@" + first.Version)
+	if err != nil || !got.Current {
+		t.Fatalf("explicit current resolve: %#v, %v", got, err)
 	}
 	if _, err := s.Verify("fancy-model", true, false); err != nil {
 		t.Fatal(err)

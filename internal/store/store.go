@@ -307,6 +307,7 @@ func (s *Store) Resolve(ref string) (Version, error) {
 	if err := naming.Validate(name); err != nil {
 		return Version{}, err
 	}
+	current := ver == ""
 	if ver == "" {
 		link, err := os.Readlink(filepath.Join(s.Root, name, "current"))
 		if err != nil {
@@ -326,7 +327,11 @@ func (s *Store) Resolve(ref string) (Version, error) {
 	if err != nil {
 		return Version{}, err
 	}
-	return Version{Name: name, Version: ver, Path: physical, Manifest: m}, nil
+	if !current {
+		link, err := os.Readlink(filepath.Join(s.Root, name, "current"))
+		current = err == nil && filepath.Base(link) == ver
+	}
+	return Version{Name: name, Version: ver, Path: physical, Current: current, Manifest: m}, nil
 }
 
 func (s *Store) Activate(ref string, noVerify bool) error {

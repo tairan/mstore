@@ -110,6 +110,7 @@ func sortedVersions(selected map[string]store.Version) []store.Version {
 func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (downloadScriptPlan, error) {
 	plan := downloadScriptPlan{}
 	seen := make(map[string]bool, len(versions))
+	var commands []string
 	for _, v := range versions {
 		src := v.Manifest.Source
 		if _, err := source.ParseRef(src.Provider + ":" + src.Repo + "@" + src.Revision); err != nil {
@@ -119,15 +120,16 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
+		plan.Models = append(plan.Models, downloadScriptModel{
+			Name: v.Name, Version: v.Version, Current: v.Current,
+			Provider: src.Provider, Repo: src.Repo, Revision: src.Revision, Command: command,
+		})
 		key := src.Provider + "\x00" + src.Repo + "\x00" + src.Revision
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		plan.Models = append(plan.Models, downloadScriptModel{
-			Name: v.Name, Version: v.Version, Current: v.Current,
-			Provider: src.Provider, Repo: src.Repo, Revision: src.Revision, Command: command,
-		})
+		commands = append(commands, command)
 	}
 
 	var b strings.Builder
@@ -141,9 +143,9 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 	}
 	b.WriteString("# Authenticate with Hugging Face or ModelScope first when a model is private or gated.\n")
 	b.WriteString("set -euo pipefail\n")
-	for _, m := range plan.Models {
+	for _, command := range commands {
 		b.WriteString("\n")
-		b.WriteString(m.Command)
+		b.WriteString(command)
 		b.WriteString("\n")
 	}
 	plan.Script = b.String()
@@ -156,7 +158,7 @@ func downloadCommand(provider, repo, revision string, opts downloadScriptOptions
 	case "hf":
 		command = "hf download " + shellQuote(repo) + " --revision " + shellQuote(revision)
 		if opts.UseUV {
-			command = "uvx " + command
+			command = "uvx --from huggingface_hub " + command
 		}
 		if opts.HFMirror {
 			command = "HF_ENDPOINT=" + shellQuote(hfMirrorEndpoint) + " " + command

@@ -266,7 +266,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--uv", "--all"}, &out, &errOut)
 	uvScript := out.String()
 	for _, command := range []string{
-		"uvx hf download 'Acme/Widget' --revision '" + oldRevision + "'",
+		"uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + oldRevision + "'",
 		"uvx modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
 	} {
 		if code != 0 || !strings.Contains(uvScript, command) {
@@ -293,7 +293,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--uv", "--hf-mirror", "--all"}, &out, &errOut)
 	combinedScript := out.String()
 	if code != 0 ||
-		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx hf download 'Acme/Widget' --revision '"+oldRevision+"'") ||
+		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '"+oldRevision+"'") ||
 		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") {
 		t.Fatalf("uv with hf-mirror: code=%d stdout=%q stderr=%q", code, combinedScript, errOut.String())
 	}
@@ -322,15 +322,57 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 		Models []struct {
 			Revision string `json:"revision"`
 			Command  string `json:"command"`
+			Current  bool   `json:"current"`
 		} `json:"models"`
 		Script string `json:"script"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx hf download 'Acme/Widget' --revision '" + currentRevision + "'"
-	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
+	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + currentRevision + "'"
+	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || !plan.Models[0].Current || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
 		t.Fatalf("unexpected JSON plan: %s", out.String())
+	}
+}
+
+func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	revision := "1111111111111111111111111111111111111111"
+	src := source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}
+	version := ""
+	for _, name := range []string{"widget-a", "widget-b"} {
+		result, err := s.Import(src, store.ImportOptions{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version == "" {
+			version = result.Version
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "--json", "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	var plan downloadScriptPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Models) != 2 || plan.Models[0].Name != "widget-a" || plan.Models[1].Name != "widget-b" {
+		t.Fatalf("models=%#v", plan.Models)
+	}
+	command := "hf download 'Acme/Widget' --revision '" + revision + "'"
+	if strings.Count(plan.Script, command) != 1 {
+		t.Fatalf("duplicate source command count=%d script=%q", strings.Count(plan.Script, command), plan.Script)
 	}
 }
 

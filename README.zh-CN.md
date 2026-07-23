@@ -166,7 +166,7 @@ mstore generate --uv --hf-mirror --all > download-models.sh
 Face 使用 `hf download REPO --revision REVISION`，ModelScope 使用
 `modelscope download --model REPO --revision REVISION`。执行前请安装相应的
 provider CLI；私有或受限模型还需要先完成认证。使用 `--uv` 时，脚本改为
-调用 `uvx hf` 与 `uvx modelscope`，目标机器只需安装 uv。`--hf-mirror` 仅为
+调用 `uvx --from huggingface_hub hf` 与 `uvx modelscope`，目标机器只需安装 uv。`--hf-mirror` 仅为
 Hugging Face 命令添加 `HF_ENDPOINT=https://hf-mirror.com`。`--all` 包含所有
 已发布版本，
 可配合 `--current-only` 只导出当前激活版本。也可以传入明确的 `model` 或

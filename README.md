@@ -178,7 +178,7 @@ The generated Bash script uses each manifest's recorded provider, repository,
 and revision: `hf download REPO --revision REVISION` for Hugging Face and
 `modelscope download --model REPO --revision REVISION` for ModelScope. Install
 the relevant provider CLIs first and authenticate before downloading private or
-gated models. With `--uv`, the script uses `uvx hf` and `uvx modelscope`
+gated models. With `--uv`, the script uses `uvx --from huggingface_hub hf` and `uvx modelscope`
 instead, so only uv needs to be installed. `--hf-mirror` prefixes only Hugging
 Face commands with `HF_ENDPOINT=https://hf-mirror.com`. `--all` includes every
 published version; use
