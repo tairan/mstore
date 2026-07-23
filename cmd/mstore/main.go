@@ -113,6 +113,8 @@ func (a *app) dispatch(command string, args []string) error {
 		return a.importModels(args)
 	case "sync":
 		return a.sync(args)
+	case "generate", "gen":
+		return a.downloadScript(args)
 	case "list", "ls":
 		return a.list(args)
 	case "show":
@@ -642,13 +644,13 @@ func (a *app) completion(args []string) error {
 	var script string
 	switch shell {
 	case "bash":
-		script = `complete -W "scan import sync list ls show path activate rename verify copy cp remove rm gc doctor completion help" mstore`
+		script = `complete -W "scan import sync generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help" mstore`
 	case "zsh":
-		script = `compdef '_arguments "1:command:(scan import sync list ls show path activate rename verify copy cp remove rm gc doctor completion help)"' mstore`
+		script = `compdef '_arguments "1:command:(scan import sync generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help)"' mstore`
 	case "fish":
-		script = `complete -c mstore -f -a "scan import sync list ls show path activate rename verify copy cp remove rm gc doctor completion help"`
+		script = `complete -c mstore -f -a "scan import sync generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help"`
 	case "powershell":
-		script = `Register-ArgumentCompleter -CommandName mstore -ScriptBlock { param($w,$a,$p) "scan","import","sync","list","show","path","activate","rename","verify","copy","remove","gc","doctor","completion","help" | Where-Object { $_ -like "$w*" } }`
+		script = `Register-ArgumentCompleter -CommandName mstore -ScriptBlock { param($w,$a,$p) "scan","import","sync","generate","gen","list","show","path","activate","rename","verify","copy","remove","gc","doctor","completion","help" | Where-Object { $_ -like "$w*" } }`
 	default:
 		return usageError("unsupported shell %q", shell)
 	}
@@ -673,29 +675,34 @@ Usage:
   mstore [global options] <command> [options]
 
 Commands:
-  scan      inspect Hugging Face and ModelScope caches
-  import    publish one or more cached sources
-  sync      publish all ready cached revisions
-  list, ls  list stored models and versions
-  show      show a model manifest
-  path      print a model's physical path
-  activate  atomically switch current
-  rename    rename a stored model
-  verify    verify stored files
-  copy, cp  copy into another local mstore
-  remove, rm remove stored versions
-  gc        clean stale staging, parts, and locks
-  doctor    diagnose store and cache health
-  completion generate shell completion
-  help      show this help
+  scan             Inspect Hugging Face and ModelScope caches.
+  import           Publish one or more cached sources.
+  sync             Publish all ready cached revisions.
+  generate, gen    Generate a Bash model download script from stored manifests.
+  list, ls         List stored models and versions.
+  show             Show a model manifest.
+  path             Print a model's physical path.
+  activate         Atomically switch current.
+  rename           Rename a stored model.
+  verify           Verify stored files.
+  copy, cp         Copy into another local mstore.
+  remove, rm       Remove stored versions.
+  gc               Clean stale staging, parts, and locks.
+  doctor           Diagnose store and cache health.
+  completion       Generate shell completion.
+  help             Show this help.
 
 Global options:
-  --store PATH  store root (default: ${MSTORE_HOME:-~/models})
-  --json        stable JSON output
-  -q, --quiet   suppress normal output
-  -v, -vv       increase diagnostics
-  --no-color    disable color
-  -V, --version show version
+  --store PATH   Store root (default: ${MSTORE_HOME:-~/models}).
+  --json         Emit stable JSON output.
+  -q, --quiet    Suppress normal output.
+  -v, -vv        Increase diagnostics.
+  --no-color     Disable color.
+  -V, --version  Show version.
+
+Examples:
+  mstore sync
+  mstore generate --all > download-models.sh
 `)
 }
 
