@@ -376,6 +376,45 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	}
 }
 
+func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, revision := range []string{"master", "release"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(revision), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := s.Import(source.Model{
+			Provider: "ms", Repo: "Qwen/Demo", Revision: revision,
+			Path: dir, Status: "ready",
+		}, store.ImportOptions{Name: "demo"})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "generate", "--all"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	script := out.String()
+	first := "modelscope download --model 'Qwen/Demo' --revision 'master'"
+	second := "modelscope download --model 'Qwen/Demo' --revision 'release'"
+	if !strings.Contains(script, first) || !strings.Contains(script, second) ||
+		strings.Count(script, "mstore sync --provider ms") != 2 ||
+		!strings.Contains(script, "WARNING: ModelScope revision Qwen/Demo@master") {
+		t.Fatalf("unexpected ModelScope script: %q", script)
+	}
+	if strings.Index(script, first) > strings.Index(script, "mstore sync --provider ms") ||
+		strings.Index(script, "mstore sync --provider ms") > strings.Index(script, second) {
+		t.Fatalf("first revision was not synced before the second: %q", script)
+	}
+}
+
 func TestCLIGenerateRequiresSelection(t *testing.T) {
 	for _, args := range [][]string{
 		{"generate"},

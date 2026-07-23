@@ -186,8 +186,12 @@ published version; use
 `model@version` arguments are also accepted; a bare model name resolves its
 `current` version. `gen` is available as a short alias. Identical
 provider/repository/revision combinations are
-emitted once. `--json` returns the selected models and generated script as a
-single JSON value.
+emitted once. When multiple revisions of one ModelScope repository are selected,
+the script runs `mstore sync --provider ms` after each download so the single
+ModelScope cache directory does not overwrite an earlier revision; `mstore`
+must be available on `PATH`. Non-commit ModelScope revisions are marked with a
+warning because they may move before the script runs. `--json` returns the
+selected models and generated script as a single JSON value.
 
 Maintenance commands:
 

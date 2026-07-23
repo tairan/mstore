@@ -173,7 +173,10 @@ Hugging Face 命令添加 `HF_ENDPOINT=https://hf-mirror.com`。`--all` 包含�
 `model@version`；不带 version 的模型名会解析为 `current`。
 `gen` 可作为短别名使用。相同的
 provider、仓库和 revision 只会生成一条下载命令。`--json` 会输出所选模型和
-生成脚本组成的一个 JSON 值。
+生成脚本组成的一个 JSON 值。同一个 ModelScope 仓库选择多个 revision 时，
+脚本会在每次下载后执行 `mstore sync --provider ms`，避免单一 ModelScope
+缓存目录覆盖之前的 revision；目标机器需保证 `mstore` 在 `PATH` 中。非提交
+ID 的 ModelScope revision 会附带警告，因为脚本执行前它可能发生变化。
 
 维护命令：
 
