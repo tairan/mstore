@@ -164,11 +164,22 @@ bash download-models.sh
 mstore sync
 ```
 
+Use `--uv` when the destination machine should run the provider CLIs through
+uv, and combine it with `--hf-mirror` to route Hugging Face downloads through
+HF-Mirror:
+
+```sh
+mstore generate --uv --hf-mirror --all > download-models.sh
+```
+
 The generated Bash script uses each manifest's recorded provider, repository,
 and revision: `hf download REPO --revision REVISION` for Hugging Face and
 `modelscope download --model REPO --revision REVISION` for ModelScope. Install
 the relevant provider CLIs first and authenticate before downloading private or
-gated models. `--all` includes every published version; use
+gated models. With `--uv`, the script uses `uvx hf` and `uvx modelscope`
+instead, so only uv needs to be installed. `--hf-mirror` prefixes only Hugging
+Face commands with `HF_ENDPOINT=https://hf-mirror.com`. `--all` includes every
+published version; use
 `--current-only` to export only active versions. Explicit `model` or
 `model@version` arguments are also accepted; a bare model name resolves its
 `current` version. `gen` is available as a short alias. Identical
@@ -214,7 +225,8 @@ Important command options:
 - `scan`: `--provider`, `--ready-only`, `--new-only`, `--long`
 - `import`: `--name`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `sync`: `--provider`, `--activate`, `--hash`, `--jobs`, `--dry-run`
-- `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`
+- `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`;
+  `--uv`; `--hf-mirror`
 - `list`: `--versions`, `--source`, `--long`
 - `show`: `--files`, `--hashes`
 - `path`: `--link`

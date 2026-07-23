@@ -67,7 +67,10 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 	for _, line := range []string{
 		"  generate, gen    Generate a Bash model download script from stored manifests.",
 		"  --store PATH   Store root (default: ${MSTORE_HOME:-~/models}).",
+		"  --uv            Run provider CLIs with uvx.",
+		"  --hf-mirror     Route Hugging Face downloads through hf-mirror.com.",
 		"  mstore generate --all > download-models.sh",
+		"  mstore generate --uv --hf-mirror --all > download-models.sh",
 	} {
 		if !strings.Contains(out.String(), line) {
 			t.Fatalf("help is missing %q:\n%s", line, out.String())
@@ -220,6 +223,43 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
+	code = run([]string{"--store", storeRoot, "generate", "--uv", "--all"}, &out, &errOut)
+	uvScript := out.String()
+	for _, command := range []string{
+		"uvx hf download 'Acme/Widget' --revision '" + oldRevision + "'",
+		"uvx modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
+	} {
+		if code != 0 || !strings.Contains(uvScript, command) {
+			t.Fatalf("uv: code=%d stdout=%q stderr=%q", code, uvScript, errOut.String())
+		}
+	}
+	if !strings.Contains(uvScript, "# This script uses uvx; install uv before running it.\n") {
+		t.Fatalf("uv script is missing its prerequisite note: %q", uvScript)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"--store", storeRoot, "generate", "--hf-mirror", "--all"}, &out, &errOut)
+	mirrorScript := out.String()
+	if code != 0 ||
+		!strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' hf download 'Acme/Widget' --revision '"+oldRevision+"'") ||
+		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") ||
+		strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' modelscope") {
+		t.Fatalf("hf-mirror: code=%d stdout=%q stderr=%q", code, mirrorScript, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"--store", storeRoot, "generate", "--uv", "--hf-mirror", "--all"}, &out, &errOut)
+	combinedScript := out.String()
+	if code != 0 ||
+		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx hf download 'Acme/Widget' --revision '"+oldRevision+"'") ||
+		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") {
+		t.Fatalf("uv with hf-mirror: code=%d stdout=%q stderr=%q", code, combinedScript, errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
 	code = run([]string{"--store", storeRoot, "gen", "--all"}, &out, &errOut)
 	if code != 0 || out.String() != got {
 		t.Fatalf("gen alias: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
@@ -234,20 +274,22 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 
 	out.Reset()
 	errOut.Reset()
-	code = run([]string{"--store", storeRoot, "--json", "generate", "widget"}, &out, &errOut)
+	code = run([]string{"--store", storeRoot, "--json", "generate", "--uv", "--hf-mirror", "widget"}, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("JSON code=%d stderr=%q", code, errOut.String())
 	}
 	var plan struct {
 		Models []struct {
 			Revision string `json:"revision"`
+			Command  string `json:"command"`
 		} `json:"models"`
 		Script string `json:"script"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || !strings.Contains(plan.Script, currentRevision) {
+	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx hf download 'Acme/Widget' --revision '" + currentRevision + "'"
+	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
 		t.Fatalf("unexpected JSON plan: %s", out.String())
 	}
 }
@@ -275,7 +317,7 @@ func TestCLIGenerateRejectsRemovedCommandNames(t *testing.T) {
 }
 
 func TestDownloadScriptQuotesShellArguments(t *testing.T) {
-	command, err := downloadCommand("hf", "Acme/Widget'$(not-a-command)", "rev'$(not-a-command)")
+	command, err := downloadCommand("hf", "Acme/Widget'$(not-a-command)", "rev'$(not-a-command)", downloadScriptOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

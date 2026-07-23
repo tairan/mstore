@@ -700,9 +700,16 @@ Global options:
   --no-color     Disable color.
   -V, --version  Show version.
 
+Generate options:
+  --all           Generate commands for all published versions.
+  --current-only  With --all, generate commands only for current versions.
+  --uv            Run provider CLIs with uvx.
+  --hf-mirror     Route Hugging Face downloads through hf-mirror.com.
+
 Examples:
   mstore sync
   mstore generate --all > download-models.sh
+  mstore generate --uv --hf-mirror --all > download-models.sh
 `)
 }
 

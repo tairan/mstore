@@ -153,10 +153,20 @@ bash download-models.sh
 mstore sync
 ```
 
+目标机器希望通过 uv 运行 provider CLI 时可使用 `--uv`；与 `--hf-mirror`
+组合可让 Hugging Face 下载走 HF-Mirror：
+
+```sh
+mstore generate --uv --hf-mirror --all > download-models.sh
+```
+
 生成的 Bash 脚本会使用 manifest 中记录的 provider、仓库和 revision：Hugging
 Face 使用 `hf download REPO --revision REVISION`，ModelScope 使用
 `modelscope download --model REPO --revision REVISION`。执行前请安装相应的
-provider CLI；私有或受限模型还需要先完成认证。`--all` 包含所有已发布版本，
+provider CLI；私有或受限模型还需要先完成认证。使用 `--uv` 时，脚本改为
+调用 `uvx hf` 与 `uvx modelscope`，目标机器只需安装 uv。`--hf-mirror` 仅为
+Hugging Face 命令添加 `HF_ENDPOINT=https://hf-mirror.com`。`--all` 包含所有
+已发布版本，
 可配合 `--current-only` 只导出当前激活版本。也可以传入明确的 `model` 或
 `model@version`；不带 version 的模型名会解析为 `current`。
 `gen` 可作为短别名使用。相同的
@@ -200,7 +210,8 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 - `scan`：`--provider`、`--ready-only`、`--new-only`、`--long`
 - `import`：`--name`、`--activate`、`--hash`、`--jobs`、`--dry-run`
 - `sync`：`--provider`、`--activate`、`--hash`、`--jobs`、`--dry-run`
-- `generate`（别名 `gen`）：模型引用或 `--all`；搭配 `--all` 可使用 `--current-only`
+- `generate`（别名 `gen`）：模型引用或 `--all`；搭配 `--all` 可使用
+  `--current-only`；`--uv`；`--hf-mirror`
 - `list`：`--versions`、`--source`、`--long`
 - `show`：`--files`、`--hashes`
 - `path`：`--link`
