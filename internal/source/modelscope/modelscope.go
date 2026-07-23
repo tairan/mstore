@@ -50,7 +50,12 @@ func Scan(root string) ([]source.Model, error) {
 				continue
 			}
 			dir := filepath.Join(root, ns.Name(), repo.Name())
-			m := source.Model{Provider: "ms", Repo: ns.Name() + "/" + repo.Name(), Path: dir, Status: "ready"}
+			m := source.Model{
+				Provider: "ms",
+				Repo:     ns.Name() + "/" + decodeCacheRepoName(repo.Name()),
+				Path:     dir,
+				Status:   "ready",
+			}
 			b, readErr := os.ReadFile(filepath.Join(dir, ".mv"))
 			if readErr != nil {
 				m.Status, m.Error = "incomplete", "missing .mv"
@@ -69,6 +74,13 @@ func Scan(root string) ([]source.Model, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref() < out[j].Ref() })
 	return out, nil
+}
+
+// ModelScope masks dots in the on-disk repository directory as triple
+// underscores. Keep the physical directory unchanged, but expose the canonical
+// remote repository name to callers.
+func decodeCacheRepoName(name string) string {
+	return strings.ReplaceAll(name, "___", ".")
 }
 
 // ModelScope writes either a plain revision or

@@ -70,6 +70,8 @@ ModelScope 缓存按以下顺序查找：
 既支持纯 revision，也支持 ModelScope 的
 `Revision:<revision>,CreatedAt:<time>` 表示形式。历史
 `hub/<namespace>/<repo>` 布局会被明确判定为不支持，不会进行探测或猜测。
+ModelScope 会将缓存目录名中的 `.` 编码为 `___`；mstore 会在展示的 source ID、
+manifest 和生成的下载命令中还原为 `.`。
 
 ## 仓库布局
 

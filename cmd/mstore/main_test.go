@@ -137,6 +137,46 @@ func TestCLISyncImportsAllReadyAndReportsJSON(t *testing.T) {
 	}
 }
 
+func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
+	cache := t.TempDir()
+	dir := filepath.Join(cache, "models", "Qwen", "Demo-0___6B")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".mv"), []byte("master"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", cache)
+	storeRoot := filepath.Join(t.TempDir(), "store")
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "sync", "--provider", "ms"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("sync code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := s.List("")
+	if err != nil || len(versions) != 1 || versions[0].Manifest.Source.Repo != "Qwen/Demo-0.6B" {
+		t.Fatalf("synced versions: %#v, %v", versions, err)
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"--store", storeRoot, "generate", "--all"}, &out, &errOut)
+	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master'"
+	if code != 0 || !strings.Contains(out.String(), want) {
+		t.Fatalf("generate code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
 func TestCLIRemovesImportAllNewAndProvider(t *testing.T) {
 	for _, args := range [][]string{
 		{"import", "--all-new"},

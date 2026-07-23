@@ -74,6 +74,8 @@ Only `models/<namespace>/<repo>` is accepted. Each model must have a valid
 `Revision:<revision>,CreatedAt:<time>` representation are understood.
 Historical `hub/<namespace>/<repo>` layouts are deliberately rejected as
 unsupported rather than probed or guessed.
+ModelScope encodes dots in cache directory names as `___`; mstore restores
+them in displayed source IDs, manifests, and generated download commands.
 
 ## Store layout
 
