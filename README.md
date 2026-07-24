@@ -163,7 +163,6 @@ machine:
 ```sh
 mstore generate --all > download-models.sh
 bash download-models.sh
-mstore sync
 ```
 
 Use `--uv` when the destination machine should run the provider CLIs through
@@ -185,16 +184,14 @@ published version; use
 `--current-only` to export only active versions. Explicit `model` or
 `model@version` arguments are also accepted; a bare model name resolves its
 `current` version. `gen` is available as a short alias. Identical
-provider/repository/revision combinations are
-emitted once. When multiple revisions of one ModelScope repository are selected,
-the script runs `mstore sync --provider ms` after each download so the single
-ModelScope cache directory does not overwrite an earlier revision; `mstore`
-must be available on `PATH`. Set `MSTORE_STORE=/destination` when the target
-store is not the default. Non-commit ModelScope revisions are marked with a
-warning because they may move before the script runs. Hugging Face commands
-include the published file inventory so partial snapshots are not expanded.
-When selected versions include active models, the script performs a final sync
-and restores those active links.
+provider/repository/revision combinations are emitted once. After each source
+download, the script runs a source-specific `mstore import` with the recorded
+name and version, preserving aliases and avoiding unrelated ready caches on the
+destination. Active versions are imported with `--activate`. `mstore` must be
+available on `PATH`. Set `MSTORE_STORE=/destination` when the target store is
+not the default. Non-commit ModelScope revisions are marked with a warning
+because they may move before the script runs. Hugging Face commands include the
+published file inventory so partial snapshots are not expanded.
 `--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:
@@ -233,7 +230,7 @@ Provider references use `hf:namespace/repo[@revision]` or
 Important command options:
 
 - `scan`: `--provider`, `--ready-only`, `--new-only`, `--long`
-- `import`: `--name`, `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `import`: `--name`, `--version`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `sync`: `--provider`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`;
   `--uv`; `--hf-mirror`

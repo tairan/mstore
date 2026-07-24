@@ -221,6 +221,7 @@ func (a *app) scan(args []string) error {
 func (a *app) importModels(args []string) error {
 	f := newFlags("import")
 	name := f.String("name", "", "")
+	version := f.String("version", "", "")
 	activate := f.Bool("activate", false, "")
 	hash := f.Bool("hash", false, "")
 	jobs := f.Int("jobs", 1, "")
@@ -235,8 +236,8 @@ func (a *app) importModels(args []string) error {
 	if len(refs) == 0 {
 		return usageError("provide SOURCE...")
 	}
-	if *name != "" && len(refs) != 1 {
-		return usageError("--name is only valid with one source")
+	if (*name != "" || *version != "") && len(refs) != 1 {
+		return usageError("--name and --version are only valid with one source")
 	}
 	var models []source.Model
 	for _, raw := range refs {
@@ -252,7 +253,7 @@ func (a *app) importModels(args []string) error {
 	}
 	var results []store.ImportResult
 	for _, m := range models {
-		res, err := a.store.Import(m, store.ImportOptions{Name: *name, Activate: *activate, Hash: *hash, DryRun: *dryRun})
+		res, err := a.store.Import(m, store.ImportOptions{Name: *name, Version: *version, Activate: *activate, Hash: *hash, DryRun: *dryRun})
 		if err != nil {
 			return err
 		}
@@ -705,6 +706,10 @@ Generate options:
   --current-only  With --all, generate commands only for current versions.
   --uv            Run provider CLIs with uvx.
   --hf-mirror     Route Hugging Face downloads through hf-mirror.com.
+
+Import options:
+  --name NAME     Store the source under an explicit model name.
+  --version VER   Store the source under an explicit version prefix.
 
 Examples:
   mstore sync

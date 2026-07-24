@@ -152,7 +152,6 @@ mstore copy --to /mnt/backup --all --all-versions
 ```sh
 mstore generate --all > download-models.sh
 bash download-models.sh
-mstore sync
 ```
 
 目标机器希望通过 uv 运行 provider CLI 时可使用 `--uv`；与 `--hf-mirror`
@@ -172,14 +171,13 @@ Hugging Face 命令添加 `HF_ENDPOINT=https://hf-mirror.com`。`--all` 包含�
 可配合 `--current-only` 只导出当前激活版本。也可以传入明确的 `model` 或
 `model@version`；不带 version 的模型名会解析为 `current`。
 `gen` 可作为短别名使用。相同的
-provider、仓库和 revision 只会生成一条下载命令。`--json` 会输出所选模型和
-生成脚本组成的一个 JSON 值。同一个 ModelScope 仓库选择多个 revision 时，
-脚本会在每次下载后执行 `mstore sync --provider ms`，避免单一 ModelScope
-缓存目录覆盖之前的 revision；目标机器需保证 `mstore` 在 `PATH` 中。非提交
-ID 的 ModelScope revision 会附带警告，因为脚本执行前它可能发生变化。目标
-仓库不是默认路径时可设置 `MSTORE_STORE=/destination`。Hugging Face 命令会
-携带已发布的文件清单，避免把部分 snapshot 扩展为完整仓库。
-如果所选版本包含当前激活版本，脚本会在最后执行同步并恢复对应的 current 链接。
+provider、仓库和 revision 只会生成一条下载命令。每次下载后，脚本都会按
+manifest 中记录的名称和版本执行定向的 `mstore import`，因此能保留自定义别名，
+也不会把目标机上其他 ready 缓存导入；当前版本会使用 `--activate`。目标机器
+需保证 `mstore` 在 `PATH` 中。非提交 ID 的 ModelScope revision 会附带警告，
+因为脚本执行前它可能发生变化。目标仓库不是默认路径时可设置
+`MSTORE_STORE=/destination`。Hugging Face 命令会携带已发布的文件清单，避免把
+部分 snapshot 扩展为完整仓库。`--json` 会输出所选模型和生成脚本组成的一个 JSON 值。
 
 维护命令：
 
@@ -216,7 +214,7 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 主要命令参数：
 
 - `scan`：`--provider`、`--ready-only`、`--new-only`、`--long`
-- `import`：`--name`、`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `import`：`--name`、`--version`、`--activate`、`--hash`、`--jobs`、`--dry-run`
 - `sync`：`--provider`、`--activate`、`--hash`、`--jobs`、`--dry-run`
 - `generate`（别名 `gen`）：模型引用或 `--all`；搭配 `--all` 可使用
   `--current-only`；`--uv`；`--hf-mirror`

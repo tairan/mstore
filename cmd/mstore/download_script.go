@@ -40,8 +40,8 @@ type downloadSourceKey struct {
 }
 
 type downloadScriptCommand struct {
-	Commands  []string
-	SyncAfter bool
+	Commands []string
+	Models   []store.Version
 }
 
 func (a *app) downloadScript(args []string) error {
@@ -123,11 +123,11 @@ func sortedVersions(selected map[string]store.Version) []store.Version {
 func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (downloadScriptPlan, error) {
 	plan := downloadScriptPlan{}
 	type sourceGroup struct {
-		files map[string]bool
+		files  map[string]bool
+		models []store.Version
 	}
 	groups := make(map[downloadSourceKey]*sourceGroup, len(versions))
 	var orderedKeys []downloadSourceKey
-	modelScopeRevisions := make(map[string]map[string]bool)
 	for _, v := range versions {
 		src := v.Manifest.Source
 		if _, err := source.ParseRef(src.Provider + ":" + src.Repo + "@" + src.Revision); err != nil {
@@ -140,19 +140,15 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 			groups[key] = group
 			orderedKeys = append(orderedKeys, key)
 		}
-		if src.Provider == "ms" {
-			if modelScopeRevisions[src.Repo] == nil {
-				modelScopeRevisions[src.Repo] = make(map[string]bool)
-			}
-			modelScopeRevisions[src.Repo][src.Revision] = true
-			continue
-		}
 		files, err := storedFiles(v)
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
-		for _, file := range files {
-			group.files[file.Path] = true
+		group.models = append(group.models, v)
+		if src.Provider == "hf" {
+			for _, file := range files {
+				group.files[file.Path] = true
+			}
 		}
 	}
 	commands := make(map[downloadSourceKey]downloadScriptCommand, len(groups))
@@ -171,8 +167,7 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		}
 		commands[key] = downloadScriptCommand{
 			Commands: command,
-			SyncAfter: key.Provider == "ms" &&
-				len(modelScopeRevisions[key.Repo]) > 1,
+			Models:   group.models,
 		}
 		if key.Provider == "ms" && !isImmutableModelScopeRevision(key.Revision) {
 			warning := "ModelScope revision " + key.Repo + "@" + key.Revision + " is not an immutable commit ID; it may move before the script runs."
@@ -210,25 +205,8 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 	}
 	b.WriteString("# Authenticate with Hugging Face or ModelScope first when a model is private or gated.\n")
 	b.WriteString("set -euo pipefail\n")
-	needsStore := false
-	for _, command := range commands {
-		needsStore = needsStore || command.SyncAfter
-	}
-	currentRefs := make([]string, 0)
-	seenCurrent := make(map[string]bool)
-	for _, v := range versions {
-		if !v.Current {
-			continue
-		}
-		ref := v.Name + "@" + v.Version
-		if !seenCurrent[ref] {
-			seenCurrent[ref] = true
-			currentRefs = append(currentRefs, ref)
-		}
-	}
-	needsStore = needsStore || len(currentRefs) > 0
-	if needsStore {
-		b.WriteString("# Set MSTORE_STORE to the destination store for sync and activation steps.\n")
+	if len(versions) > 0 {
+		b.WriteString("# Set MSTORE_STORE to the destination store for imports.\n")
 		b.WriteString("MSTORE_STORE=\"${MSTORE_STORE:-${MSTORE_HOME:-$HOME/models}}\"\n")
 	}
 	for _, key := range orderedKeys {
@@ -236,19 +214,19 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		for _, text := range command.Commands {
 			b.WriteString("\n")
 			b.WriteString(text)
-			if command.SyncAfter {
-				b.WriteString("\n# Preserve this ModelScope revision before downloading the next one.\n")
-				b.WriteString("mstore --store \"$MSTORE_STORE\" sync --provider ms")
-			}
 			b.WriteString("\n")
 		}
-	}
-	if len(currentRefs) > 0 {
-		b.WriteString("\nmstore --store \"$MSTORE_STORE\" sync\n")
-		for _, ref := range currentRefs {
-			b.WriteString("mstore --store \"$MSTORE_STORE\" activate ")
-			b.WriteString(shellQuote(ref))
-			b.WriteString(" --no-verify\n")
+		for _, v := range command.Models {
+			b.WriteString("\nmstore --store \"$MSTORE_STORE\" import --name ")
+			b.WriteString(shellQuote(v.Name))
+			b.WriteString(" --version ")
+			b.WriteString(shellQuote(v.Version))
+			if v.Current {
+				b.WriteString(" --activate")
+			}
+			b.WriteByte(' ')
+			b.WriteString(shellQuote(v.Manifest.Source.Provider + ":" + v.Manifest.Source.Repo + "@" + v.Manifest.Source.Revision))
+			b.WriteByte('\n')
 		}
 	}
 	plan.Script = b.String()
@@ -260,12 +238,15 @@ func storedFiles(v store.Version) ([]manifest.File, error) {
 	for _, file := range v.Manifest.Entries {
 		fullHash = fullHash || file.SHA256 != ""
 	}
-	files, _, err := fsutil.Scan(v.Path, fullHash)
+	files, bytes, err := fsutil.Scan(v.Path, fullHash)
 	if err != nil {
 		return nil, fmt.Errorf("scan stored files: %w", err)
 	}
 	if len(files) != v.Manifest.Files {
 		return nil, fmt.Errorf("stored file inventory changed: manifest has %d files, found %d", v.Manifest.Files, len(files))
+	}
+	if bytes != v.Manifest.Bytes {
+		return nil, fmt.Errorf("stored byte count changed: manifest has %d bytes, found %d", v.Manifest.Bytes, bytes)
 	}
 	if len(v.Manifest.Entries) > 0 {
 		expected := append([]manifest.File(nil), v.Manifest.Entries...)

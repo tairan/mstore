@@ -259,8 +259,8 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 		}
 	}
 	for _, activation := range []string{
-		"mstore --store \"$MSTORE_STORE\" activate 'widget@" + currentRevision[:12] + "' --no-verify",
-		"mstore --store \"$MSTORE_STORE\" activate 'demo@" + msRevision + "' --no-verify",
+		"mstore --store \"$MSTORE_STORE\" import --name 'widget' --version '" + currentRevision[:12] + "' --activate 'hf:Acme/Widget@" + currentRevision + "'",
+		"mstore --store \"$MSTORE_STORE\" import --name 'demo' --version '" + msRevision + "' --activate 'ms:Qwen/Demo@" + msRevision + "'",
 	} {
 		if !strings.Contains(got, activation) {
 			t.Fatalf("generated script missing activation %q:\n%s", activation, got)
@@ -268,6 +268,9 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "#!/usr/bin/env bash\n") || !strings.Contains(got, "set -euo pipefail\n") {
 		t.Fatalf("not a Bash script: %q", got)
+	}
+	if strings.Contains(got, "mstore --store \"$MSTORE_STORE\" sync") {
+		t.Fatalf("generated script must not perform an unfiltered sync: %q", got)
 	}
 
 	out.Reset()
@@ -388,6 +391,12 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	if strings.Count(plan.Script, command) != 1 {
 		t.Fatalf("duplicate source command count=%d script=%q", strings.Count(plan.Script, command), plan.Script)
 	}
+	for _, name := range []string{"widget-a", "widget-b"} {
+		want := "mstore --store \"$MSTORE_STORE\" import --name '" + name + "' --version '" + version + "' 'hf:Acme/Widget@" + revision + "'"
+		if !strings.Contains(plan.Script, want) {
+			t.Fatalf("missing alias import %q in %q", want, plan.Script)
+		}
+	}
 }
 
 func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
@@ -419,13 +428,14 @@ func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
 	first := "modelscope download --model 'Qwen/Demo' --revision 'master'"
 	second := "modelscope download --model 'Qwen/Demo' --revision 'release'"
 	if !strings.Contains(script, first) || !strings.Contains(script, second) ||
-		strings.Count(script, "mstore --store \"$MSTORE_STORE\" sync --provider ms") != 2 ||
+		strings.Count(script, "mstore --store \"$MSTORE_STORE\" import --name 'demo'") != 2 ||
 		!strings.Contains(script, "WARNING: ModelScope revision Qwen/Demo@master") {
 		t.Fatalf("unexpected ModelScope script: %q", script)
 	}
-	if strings.Index(script, first) > strings.Index(script, "mstore --store \"$MSTORE_STORE\" sync --provider ms") ||
-		strings.Index(script, "mstore --store \"$MSTORE_STORE\" sync --provider ms") > strings.Index(script, second) {
-		t.Fatalf("first revision was not synced before the second: %q", script)
+	firstImport := "mstore --store \"$MSTORE_STORE\" import --name 'demo' --version 'master' 'ms:Qwen/Demo@master'"
+	if strings.Index(script, first) > strings.Index(script, firstImport) ||
+		strings.Index(script, firstImport) > strings.Index(script, second) {
+		t.Fatalf("first revision was not imported before the second: %q", script)
 	}
 }
 
@@ -459,6 +469,34 @@ func TestCLIGenerateRejectsChangedManifestInventory(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := run([]string{"--store", storeRoot, "generate", "widget@" + result.Version}, &out, &errOut)
 	if code != 1 || !strings.Contains(errOut.String(), "stored file inventory differs from manifest") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLIGenerateRejectsChangedManifestBytes(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Import(source.Model{
+		Provider: "hf", Repo: "Acme/Widget", Revision: "111111111111aaaa",
+		Path: dir, Status: "ready",
+	}, store.ImportOptions{Name: "widget"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(result.Path, "config.json"), []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "generate", "widget@" + result.Version}, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "stored byte count changed") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
