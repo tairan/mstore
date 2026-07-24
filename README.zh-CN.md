@@ -119,6 +119,42 @@ provider 缓存会被跳过，incomplete revision 会被忽略；单个模型失
 Hugging Face 按 `refs/main`、`refs/master` 的顺序选择，ModelScope 优先使用
 `.mv`；如果一个仓库只有一个 ready revision，则将其作为兜底选择。
 
+### 使用模型配置进行受控同步
+
+将当前缓存中 ready 的 revision 导出为可维护的 TOML 文件，只启用需要发布的
+模型，再按该精确清单同步：
+
+```sh
+mstore config export
+$EDITOR models.toml
+mstore config check models.toml
+mstore sync --config models.toml --dry-run
+mstore sync --config models.toml
+```
+
+未提供 `--output` 时会写入当前目录的 `./models.toml`；若该文件已存在则拒绝
+覆盖，只有明确指定 `--overwrite` 才会替换。导出文件会列出全部 ready revision，
+但均为 `enabled = false`；省略 `enabled` 也视为 false。每个启用的条目必须包含完整的
+`provider:repo@revision`，可通过 `name` 指定 mstore 中的目标名称：
+
+```toml
+schema = 1
+
+[defaults]
+hash = false
+
+[[models]]
+source = "hf:Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@COMMIT"
+enabled = true
+name = "qwen3-tts"
+```
+
+`sync --config` 仅导入启用且精确匹配缓存的 revision。选中的来源不存在或未完成
+时命令会以非零状态退出。配置文件不控制激活；需要激活时使用
+`mstore sync --config models.toml --activate`。v1 以完整 provider snapshot 为
+导入单位：同一 snapshot 内的多个量化文件会一起发布。不同量化 repo 或 revision
+可使用 `model-q4-k-m`、`model-q8-0` 等不同名称。
+
 查看、激活和校验：
 
 ```sh
@@ -202,7 +238,7 @@ mstore doctor --provider all --write-test
 顶层命令：
 
 ```text
-scan import sync generate list(ls) show path activate rename verify
+scan import sync config generate list(ls) show path activate rename verify
 copy(cp) remove(rm) gc doctor completion help
 ```
 
@@ -220,7 +256,9 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 
 - `scan`：`--provider`、`--ready-only`、`--new-only`、`--long`
 - `import`：`--name`、`--version`、`--activate`、`--hash`、`--jobs`、`--dry-run`
-- `sync`：`--provider`、`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `sync`：`--provider`、`--config`、`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `config export`：`--output`、`--provider`、`--overwrite`
+- `config check`：`FILE`
 - `generate`（别名 `gen`）：模型引用或 `--all`；搭配 `--all` 可使用
   `--current-only`；`--uv`；`--hf-mirror`
 - `list`：`--versions`、`--source`、`--long`

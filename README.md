@@ -127,6 +127,45 @@ activation enabled, Hugging Face prefers `refs/main` then `refs/master`, and
 ModelScope prefers `.mv`; a repository with exactly one ready revision uses
 that revision as a fallback.
 
+### Controlled sync with a model config
+
+Export the ready cache revisions into an editable TOML file, enable only the
+models to publish, and sync that exact selection:
+
+```sh
+mstore config export
+$EDITOR models.toml
+mstore config check models.toml
+mstore sync --config models.toml --dry-run
+mstore sync --config models.toml
+```
+
+Without `--output`, export writes `./models.toml` and refuses to replace an
+existing file; use `--overwrite` only when replacement is intended. The export
+contains every ready revision with `enabled = false`; an omitted `enabled` value
+is also false. Each enabled entry must use a full
+`provider:repo@revision` source and may choose a destination `name`:
+
+```toml
+schema = 1
+
+[defaults]
+hash = false
+
+[[models]]
+source = "hf:Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice@COMMIT"
+enabled = true
+name = "qwen3-tts"
+```
+
+`sync --config` imports only enabled, exact cache revisions. A selected source
+that is missing or incomplete causes a non-zero exit status. The configuration
+does not control activation; use `mstore sync --config models.toml --activate`
+when activation is wanted. The v1 import unit is a complete provider snapshot:
+when multiple quantized files live in one snapshot, they are published together.
+Different quantization repos or revisions can be given separate names such as
+`model-q4-k-m` and `model-q8-0`.
+
 Inspect, activate, and verify:
 
 ```sh
@@ -220,7 +259,7 @@ models or provider caches.
 Top-level commands:
 
 ```text
-scan import sync generate list(ls) show path activate rename verify
+scan import sync config generate list(ls) show path activate rename verify
 copy(cp) remove(rm) gc doctor completion help
 ```
 
@@ -238,7 +277,9 @@ Important command options:
 
 - `scan`: `--provider`, `--ready-only`, `--new-only`, `--long`
 - `import`: `--name`, `--version`, `--activate`, `--hash`, `--jobs`, `--dry-run`
-- `sync`: `--provider`, `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `sync`: `--provider`, `--config`, `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `config export`: `--output`, `--provider`, `--overwrite`
+- `config check`: `FILE`
 - `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`;
   `--uv`; `--hf-mirror`
 - `list`: `--versions`, `--source`, `--long`
