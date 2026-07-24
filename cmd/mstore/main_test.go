@@ -172,7 +172,7 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	code = run([]string{"--store", storeRoot, "generate", "--all"}, &out, &errOut)
-	want := "modelscope download --model 'Qwen/Demo-0.6B' 'config.json' --revision 'master'"
+	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master' -- 'config.json'"
 	if code != 0 || !strings.Contains(out.String(), want) {
 		t.Fatalf("generate code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
@@ -250,9 +250,9 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	}
 	got := out.String()
 	for _, command := range []string{
-		"hf download 'Acme/Widget' 'config.json' --revision '" + oldRevision + "'",
-		"hf download 'Acme/Widget' 'config.json' --revision '" + currentRevision + "'",
-		"modelscope download --model 'Qwen/Demo' 'config.json' --revision '" + msRevision + "'",
+		"hf download 'Acme/Widget' --revision '" + oldRevision + "' -- 'config.json'",
+		"hf download 'Acme/Widget' --revision '" + currentRevision + "' -- 'config.json'",
+		"modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "' -- 'config.json'",
 	} {
 		if !strings.Contains(got, command) {
 			t.Fatalf("generated script missing %q:\n%s", command, got)
@@ -272,14 +272,25 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	if strings.Contains(got, "mstore --store \"$MSTORE_STORE\" sync") {
 		t.Fatalf("generated script must not perform an unfiltered sync: %q", got)
 	}
+	for _, line := range []string{
+		"MSTORE_DOWNLOAD_CACHE=\"$(mktemp -d)\"",
+		"MSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/source-0\"",
+		"export HF_HUB_CACHE=\"$MSTORE_SOURCE_CACHE/huggingface\"",
+		"export MODELSCOPE_CACHE=\"$MSTORE_SOURCE_CACHE/modelscope\"",
+		"trap 'rm -rf -- \"$MSTORE_DOWNLOAD_CACHE\"' EXIT",
+	} {
+		if !strings.Contains(got, line) {
+			t.Fatalf("generated script missing cache isolation %q: %s", line, got)
+		}
+	}
 
 	out.Reset()
 	errOut.Reset()
 	code = run([]string{"--store", storeRoot, "generate", "--uv", "--all"}, &out, &errOut)
 	uvScript := out.String()
 	for _, command := range []string{
-		"uvx --from huggingface_hub hf download 'Acme/Widget' 'config.json' --revision '" + oldRevision + "'",
-		"uvx modelscope download --model 'Qwen/Demo' 'config.json' --revision '" + msRevision + "'",
+		"uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + oldRevision + "' -- 'config.json'",
+		"uvx modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "' -- 'config.json'",
 	} {
 		if code != 0 || !strings.Contains(uvScript, command) {
 			t.Fatalf("uv: code=%d stdout=%q stderr=%q", code, uvScript, errOut.String())
@@ -294,8 +305,8 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--hf-mirror", "--all"}, &out, &errOut)
 	mirrorScript := out.String()
 	if code != 0 ||
-		!strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' hf download 'Acme/Widget' 'config.json' --revision '"+oldRevision+"'") ||
-		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' 'config.json' --revision '"+msRevision+"'") ||
+		!strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' hf download 'Acme/Widget' --revision '"+oldRevision+"' -- 'config.json'") ||
+		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"' -- 'config.json'") ||
 		strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' modelscope") {
 		t.Fatalf("hf-mirror: code=%d stdout=%q stderr=%q", code, mirrorScript, errOut.String())
 	}
@@ -305,8 +316,8 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--uv", "--hf-mirror", "--all"}, &out, &errOut)
 	combinedScript := out.String()
 	if code != 0 ||
-		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' 'config.json' --revision '"+oldRevision+"'") ||
-		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' 'config.json' --revision '"+msRevision+"'") {
+		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '"+oldRevision+"' -- 'config.json'") ||
+		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"' -- 'config.json'") {
 		t.Fatalf("uv with hf-mirror: code=%d stdout=%q stderr=%q", code, combinedScript, errOut.String())
 	}
 
@@ -341,7 +352,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' 'config.json' --revision '" + currentRevision + "'"
+	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + currentRevision + "' -- 'config.json'"
 	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || !plan.Models[0].Current || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
 		t.Fatalf("unexpected JSON plan: %s", out.String())
 	}
@@ -413,8 +424,41 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Models) != 2 || strings.Count(plan.Script, "hf download 'Acme/Widget' 'config.json'") != 1 {
+	if len(plan.Models) != 2 || strings.Count(plan.Script, "hf download 'Acme/Widget' --revision '"+revision+"' -- 'config.json'") != 1 {
 		t.Fatalf("models=%#v script=%q", plan.Models, plan.Script)
+	}
+}
+
+func TestCLIGenerateRejectsAliasHashMismatch(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := "1111111111111111111111111111111111111111"
+	version := ""
+	for _, name := range []string{"widget-a", "widget-b"} {
+		dir := t.TempDir()
+		content := []byte("a")
+		if name == "widget-b" {
+			content = []byte("b")
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		result, err := s.Import(source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}, store.ImportOptions{Name: name, Hash: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version == "" {
+			version = result.Version
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "different stored file inventories") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
 
@@ -444,8 +488,8 @@ func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	script := out.String()
-	first := "modelscope download --model 'Qwen/Demo' 'config.json' --revision 'master'"
-	second := "modelscope download --model 'Qwen/Demo' 'config.json' --revision 'release'"
+	first := "modelscope download --model 'Qwen/Demo' --revision 'master' -- 'config.json'"
+	second := "modelscope download --model 'Qwen/Demo' --revision 'release' -- 'config.json'"
 	if !strings.Contains(script, first) || !strings.Contains(script, second) ||
 		strings.Count(script, "mstore --store \"$MSTORE_STORE\" import --name 'demo'") != 2 ||
 		!strings.Contains(script, "WARNING: ModelScope revision Qwen/Demo@master") {
@@ -534,6 +578,15 @@ func TestDownloadCommandsChunkLargeInventories(t *testing.T) {
 			t.Fatalf("command length=%d exceeds limit", len(command))
 		}
 	}
+	modelScopeCommands, err := downloadCommands("ms", "Acme/Widget", "111111111111aaaa", files, downloadScriptOptions{})
+	if err != nil || len(modelScopeCommands) < 2 {
+		t.Fatalf("ModelScope commands=%d err=%v", len(modelScopeCommands), err)
+	}
+	for _, command := range modelScopeCommands {
+		if len(command) > maxDownloadCommandLength {
+			t.Fatalf("ModelScope command length=%d exceeds limit", len(command))
+		}
+	}
 }
 
 func TestCLIGenerateRequiresSelection(t *testing.T) {
@@ -566,5 +619,9 @@ func TestDownloadScriptQuotesShellArguments(t *testing.T) {
 	want := `hf download 'Acme/Widget'"'"'$(not-a-command)' --revision 'rev'"'"'$(not-a-command)'`
 	if command != want {
 		t.Fatalf("command=%q want=%q", command, want)
+	}
+	command, err = downloadCommand("hf", "Acme/Widget", "rev", []string{"-not-an-option"}, downloadScriptOptions{})
+	if err != nil || !strings.Contains(command, " -- '-not-an-option'") {
+		t.Fatalf("file option delimiter missing: %q err=%v", command, err)
 	}
 }

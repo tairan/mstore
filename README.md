@@ -194,6 +194,8 @@ because they may move before the script runs. Provider download commands include
 the published file inventory so partial snapshots are not expanded. If aliases
 share a source but have different inventories, generation stops rather than
 silently publishing one alias with another alias's files.
+Each source uses a temporary isolated provider cache, which is removed when the
+script exits.
 `--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:

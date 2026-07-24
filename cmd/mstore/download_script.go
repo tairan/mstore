@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/chieworks/mstore/internal/fsutil"
@@ -147,7 +148,7 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		}
 		if len(group.inventory) == 0 {
 			group.inventory = append([]manifest.File(nil), files...)
-		} else if !fsutil.SameTree(group.inventory, files, false) {
+		} else if !fsutil.SameTree(group.inventory, files, hasHashes(group.inventory) && hasHashes(files)) {
 			return plan, fmt.Errorf("%s@%s: selected aliases for %s have different stored file inventories; generate them separately", v.Name, v.Version, key.Provider+":"+key.Repo+"@"+key.Revision)
 		}
 		group.models = append(group.models, v)
@@ -212,9 +213,17 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 	if len(versions) > 0 {
 		b.WriteString("# Set MSTORE_STORE to the destination store for imports.\n")
 		b.WriteString("MSTORE_STORE=\"${MSTORE_STORE:-${MSTORE_HOME:-$HOME/models}}\"\n")
+		b.WriteString("# Use isolated provider caches so pre-existing snapshots cannot contaminate imports.\n")
+		b.WriteString("MSTORE_DOWNLOAD_CACHE=\"$(mktemp -d)\"\n")
+		b.WriteString("trap 'rm -rf -- \"$MSTORE_DOWNLOAD_CACHE\"' EXIT\n")
 	}
-	for _, key := range orderedKeys {
+	for index, key := range orderedKeys {
 		command := commands[key]
+		b.WriteString("\nMSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/source-")
+		b.WriteString(strconv.Itoa(index))
+		b.WriteString("\"\n")
+		b.WriteString("export HF_HUB_CACHE=\"$MSTORE_SOURCE_CACHE/huggingface\"\n")
+		b.WriteString("export MODELSCOPE_CACHE=\"$MSTORE_SOURCE_CACHE/modelscope\"\n")
 		for _, text := range command.Commands {
 			b.WriteString("\n")
 			b.WriteString(text)
@@ -262,6 +271,18 @@ func storedFiles(v store.Version) ([]manifest.File, error) {
 	return files, nil
 }
 
+func hasHashes(files []manifest.File) bool {
+	if len(files) == 0 {
+		return false
+	}
+	for _, file := range files {
+		if file.SHA256 == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func isImmutableModelScopeRevision(revision string) bool {
 	if len(revision) != 40 && len(revision) != 64 {
 		return false
@@ -277,14 +298,14 @@ func isImmutableModelScopeRevision(revision string) bool {
 const maxDownloadCommandLength = 64 * 1024
 
 func downloadCommands(provider, repo, revision string, files []string, opts downloadScriptOptions) ([]string, error) {
-	if provider != "hf" || len(files) == 0 {
+	if len(files) == 0 {
 		command, err := downloadCommand(provider, repo, revision, files, opts)
 		if err != nil {
 			return nil, err
 		}
 		return []string{command}, nil
 	}
-	baseLength := len(downloadCommandPrefix(provider, repo, revision, opts))
+	baseLength := len(downloadCommandPrefix(provider, repo, revision, opts)) + len(" --")
 	var commands []string
 	var chunk []string
 	chunkLength := baseLength
@@ -321,11 +342,13 @@ func downloadCommand(provider, repo, revision string, files []string, opts downl
 	var command string
 	switch provider {
 	case "hf":
-		command = "hf download " + shellQuote(repo)
+		command = "hf download " + shellQuote(repo) + " --revision " + shellQuote(revision)
+		if len(files) > 0 {
+			command += " --"
+		}
 		for _, file := range files {
 			command += " " + shellQuote(file)
 		}
-		command += " --revision " + shellQuote(revision)
 		if opts.UseUV {
 			command = "uvx --from huggingface_hub " + command
 		}
@@ -333,11 +356,13 @@ func downloadCommand(provider, repo, revision string, files []string, opts downl
 			command = "HF_ENDPOINT=" + shellQuote(hfMirrorEndpoint) + " " + command
 		}
 	case "ms":
-		command = "modelscope download --model " + shellQuote(repo)
+		command = "modelscope download --model " + shellQuote(repo) + " --revision " + shellQuote(revision)
+		if len(files) > 0 {
+			command += " --"
+		}
 		for _, file := range files {
 			command += " " + shellQuote(file)
 		}
-		command += " --revision " + shellQuote(revision)
 		if opts.UseUV {
 			command = "uvx " + command
 		}
