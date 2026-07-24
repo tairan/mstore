@@ -273,6 +273,73 @@ func TestProviderScanErrors(t *testing.T) {
 	}
 }
 
+func TestConfiguredSelectionsScopeScanningAndAllowNoEnabledModels(t *testing.T) {
+	repository, _ := store.Open(t.TempDir())
+	model := modelFixture(t, "hf", "Acme/Widget", "111111111111aaaa")
+	calledWith := ""
+	scan := func(provider string) ([]source.Model, []error) {
+		calledWith = provider
+		return []source.Model{model}, nil
+	}
+	report, err := Run(repository, scan, Options{
+		Provider: "all", Configured: true, Jobs: 1,
+		Selections: []Selection{{Source: source.Ref{Provider: "hf", Repo: "Acme/Widget", Revision: model.Revision}, Name: "widget"}},
+	})
+	if err != nil || calledWith != "hf" || report.Summary.Imported != 1 {
+		t.Fatalf("report=%#v calledWith=%q err=%v", report, calledWith, err)
+	}
+
+	calledWith = ""
+	report, err = Run(repository, scan, Options{Provider: "all", Configured: true, Jobs: 1})
+	if err != nil || calledWith != "" || report.Summary.Imported != 0 {
+		t.Fatalf("empty config report=%#v calledWith=%q err=%v", report, calledWith, err)
+	}
+}
+
+func TestConfiguredConflictDoesNotBlockOtherDestination(t *testing.T) {
+	repository, _ := store.Open(t.TempDir())
+	owner := modelFixture(t, "ms", "Other/Owner", "aaaaaaaaaaaaaaaa")
+	if _, err := repository.Import(owner, store.ImportOptions{Name: "taken"}); err != nil {
+		t.Fatal(err)
+	}
+	conflicting := modelFixture(t, "hf", "Acme/Widget", "111111111111aaaa")
+	available := modelFixture(t, "hf", "Acme/Widget", "222222222222bbbb")
+	report, err := Run(repository, scanner([]source.Model{conflicting, available}), Options{
+		Provider: "all", Configured: true, Jobs: 1,
+		Selections: []Selection{
+			{Source: source.Ref{Provider: "hf", Repo: "Acme/Widget", Revision: conflicting.Revision}, Name: "taken"},
+			{Source: source.Ref{Provider: "hf", Repo: "Acme/Widget", Revision: available.Revision}, Name: "available"},
+		},
+	})
+	var runErr *RunError
+	if !errors.As(err, &runErr) || report.Summary.Conflict != 1 || report.Summary.Imported != 1 {
+		t.Fatalf("report=%#v err=%v", report, err)
+	}
+	versions, listErr := repository.List("available")
+	if listErr != nil || len(versions) != 1 || versions[0].Manifest.Source.Revision != available.Revision {
+		t.Fatalf("versions=%#v err=%v", versions, listErr)
+	}
+}
+
+func TestConfiguredHashUpgradesExistingVersion(t *testing.T) {
+	repository, _ := store.Open(t.TempDir())
+	model := modelFixture(t, "hf", "Acme/Widget", "111111111111aaaa")
+	if _, err := repository.Import(model, store.ImportOptions{Name: "widget"}); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Run(repository, scanner([]source.Model{model}), Options{
+		Provider: "all", Configured: true, Hash: true, Jobs: 1,
+		Selections: []Selection{{Source: source.Ref{Provider: "hf", Repo: "Acme/Widget", Revision: model.Revision}, Name: "widget"}},
+	})
+	if err != nil || report.Summary.Skipped != 1 {
+		t.Fatalf("report=%#v err=%v", report, err)
+	}
+	versions, listErr := repository.List("widget")
+	if listErr != nil || len(versions) != 1 || len(versions[0].Manifest.Entries) == 0 || versions[0].Manifest.Entries[0].SHA256 == "" {
+		t.Fatalf("versions=%#v err=%v", versions, listErr)
+	}
+}
+
 type concurrentRepository struct {
 	active int32
 	max    int32

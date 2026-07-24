@@ -66,16 +66,35 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 	for _, line := range []string{
-		"  generate, gen    Generate a Bash model download script from stored manifests.",
-		"  --store PATH   Store root (default: ${MSTORE_HOME:-~/models}).",
-		"  --uv            Run provider CLIs with uvx.",
-		"  --hf-mirror     Route Hugging Face downloads through hf-mirror.com.",
+		"  generate, gen        Generate a Bash download script from stored manifests.",
+		"  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).",
+		"  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]",
+		"      Write ./models.toml by default. Existing files are protected unless",
+		"  generate:  --all  --current-only  --uv  --hf-mirror",
 		"  mstore generate --all > download-models.sh",
 		"  mstore generate --uv --hf-mirror --all > download-models.sh",
 	} {
 		if !strings.Contains(out.String(), line) {
 			t.Fatalf("help is missing %q:\n%s", line, out.String())
 		}
+	}
+}
+
+func TestCLIConfigExportDefaultsToProtectedModelsToml(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", filepath.Join(t.TempDir(), "missing"))
+	var out, errOut bytes.Buffer
+	if code := run([]string{"config", "export"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat("models.toml"); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"config", "export"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "warning: config models.toml already exists") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
 
@@ -135,6 +154,97 @@ func TestCLISyncImportsAllReadyAndReportsJSON(t *testing.T) {
 	}
 	if report.Summary.Skipped != 2 { // imported model plus missing ModelScope cache
 		t.Fatalf("unexpected JSON report: %s", out.String())
+	}
+}
+
+func TestCLISyncConfigSelectsExactSource(t *testing.T) {
+	cache := t.TempDir()
+	for _, revision := range []string{"0123456789abcdef", "fedcba9876543210"} {
+		repo := filepath.Join(cache, "models--Acme--Widget")
+		blob := filepath.Join(repo, "blobs", revision)
+		snapshot := filepath.Join(repo, "snapshots", revision)
+		if err := os.MkdirAll(filepath.Dir(blob), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(snapshot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(blob, []byte(revision), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("../../blobs/"+revision, filepath.Join(snapshot, "model.bin")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HF_HUB_CACHE", cache)
+	t.Setenv("MODELSCOPE_CACHE", filepath.Join(t.TempDir(), "missing"))
+	config := filepath.Join(t.TempDir(), "models.toml")
+	if err := os.WriteFile(config, []byte("schema = 1\n\n[[models]]\nsource = \"hf:Acme/Widget@fedcba9876543210\"\nenabled = true\nname = \"widget-q4\"\n\n[[models]]\nsource = \"hf:Acme/Widget@0123456789abcdef\"\nenabled = false\nname = \"widget-q8\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "sync", "--config", config}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := s.List("")
+	if err != nil || len(versions) != 1 || versions[0].Name != "widget-q4" || versions[0].Manifest.Source.Revision != "fedcba9876543210" {
+		t.Fatalf("versions=%#v err=%v", versions, err)
+	}
+}
+
+func TestCLISyncConfigFailsForMissingSelectedSource(t *testing.T) {
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", filepath.Join(t.TempDir(), "missing"))
+	config := filepath.Join(t.TempDir(), "models.toml")
+	if err := os.WriteFile(config, []byte("schema = 1\n\n[[models]]\nsource = \"hf:Acme/Widget@0123456789abcdef\"\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", t.TempDir(), "sync", "--config", config}, &out, &errOut)
+	if code == 0 || !strings.Contains(out.String(), "not ready") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLISyncConfigWithNoEnabledModelsDoesNotFallBackToFullSync(t *testing.T) {
+	cache := t.TempDir()
+	repo := filepath.Join(cache, "models--Acme--Widget")
+	if err := os.MkdirAll(filepath.Join(repo, "blobs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "snapshots", "0123456789abcdef"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "blobs", "a"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../../blobs/a", filepath.Join(repo, "snapshots", "0123456789abcdef", "model.bin")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HF_HUB_CACHE", cache)
+	t.Setenv("MODELSCOPE_CACHE", filepath.Join(t.TempDir(), "missing"))
+	config := filepath.Join(t.TempDir(), "models.toml")
+	if err := os.WriteFile(config, []byte("schema = 1\n\n[[models]]\nsource = \"hf:Acme/Widget@0123456789abcdef\"\nenabled = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", storeRoot, "sync", "--config", config}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := s.List("")
+	if err != nil || len(versions) != 0 {
+		t.Fatalf("versions=%#v err=%v", versions, err)
 	}
 }
 

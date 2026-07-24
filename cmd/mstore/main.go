@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chieworks/mstore/internal/fsutil"
+	"github.com/chieworks/mstore/internal/modelconfig"
 	"github.com/chieworks/mstore/internal/naming"
 	"github.com/chieworks/mstore/internal/providers"
 	"github.com/chieworks/mstore/internal/reconcile"
@@ -113,6 +114,8 @@ func (a *app) dispatch(command string, args []string) error {
 		return a.importModels(args)
 	case "sync":
 		return a.sync(args)
+	case "config":
+		return a.config(args)
 	case "generate", "gen":
 		return a.downloadScript(args)
 	case "list", "ls":
@@ -265,6 +268,7 @@ func (a *app) importModels(args []string) error {
 func (a *app) sync(args []string) error {
 	f := newFlags("sync")
 	provider := f.String("provider", "all", "")
+	configPath := f.String("config", "", "")
 	activate := f.Bool("activate", false, "")
 	hash := f.Bool("hash", false, "")
 	jobs := f.Int("jobs", 1, "")
@@ -275,13 +279,36 @@ func (a *app) sync(args []string) error {
 	if err := validProvider(*provider); err != nil {
 		return err
 	}
-	report, syncErr := reconcile.Run(a.store, providers.Scan, reconcile.Options{
+	if *configPath != "" && len(f.Args()) > 0 {
+		return usageError("model refs cannot be used with --config")
+	}
+	options := reconcile.Options{
 		Provider: *provider,
 		Models:   f.Args(),
 		Activate: *activate,
 		Hash:     *hash,
 		Jobs:     *jobs,
 		DryRun:   *dryRun,
+	}
+	if *configPath != "" {
+		file, err := modelconfig.Read(*configPath)
+		if err != nil {
+			return fmt.Errorf("read config %s: %w", *configPath, err)
+		}
+		selections, err := modelconfig.Selections(file)
+		if err != nil {
+			return err
+		}
+		options.Hash = options.Hash || file.Defaults.Hash
+		options.Configured = true
+		options.Selections = make([]reconcile.Selection, len(selections))
+		for i, selection := range selections {
+			options.Selections[i] = reconcile.Selection{Source: selection.Source, Name: selection.Name}
+		}
+	}
+	report, syncErr := reconcile.Run(a.store, providers.Scan, reconcile.Options{
+		Provider: options.Provider, Models: options.Models, Configured: options.Configured, Selections: options.Selections,
+		Activate: options.Activate, Hash: options.Hash, Jobs: options.Jobs, DryRun: options.DryRun,
 	})
 	var selectionErr reconcile.SelectionError
 	if errors.As(syncErr, &selectionErr) {
@@ -291,6 +318,68 @@ func (a *app) sync(args []string) error {
 		return err
 	}
 	return syncErr
+}
+
+func (a *app) config(args []string) error {
+	if len(args) == 0 {
+		return usageError("config requires export or check")
+	}
+	switch args[0] {
+	case "export":
+		f := newFlags("config export")
+		output := f.String("output", "models.toml", "")
+		provider := f.String("provider", "all", "")
+		overwrite := f.Bool("overwrite", false, "")
+		if err := f.Parse(args[1:]); err != nil {
+			return usageError("%v", err)
+		}
+		if *output == "" || len(f.Args()) != 0 {
+			return usageError("config export accepts no positional arguments")
+		}
+		if err := validProvider(*provider); err != nil {
+			return err
+		}
+		path := modelconfig.OutputPath(*output)
+		models, scanErrs := providers.Scan(*provider)
+		for _, scanErr := range scanErrs {
+			fmt.Fprintln(a.err, "mstore config export:", scanErr)
+			if !errors.Is(scanErr, os.ErrNotExist) {
+				return fmt.Errorf("scan provider caches: %w", scanErr)
+			}
+		}
+		exported, err := modelconfig.Export(path, models, *overwrite)
+		if err != nil {
+			return err
+		}
+		if a.global.json {
+			return writeJSON(a.out, map[string]any{"path": path, "models": exported})
+		}
+		if !a.global.quiet {
+			fmt.Fprintln(a.out, "exported", path)
+		}
+		return nil
+	case "check":
+		if len(args) != 2 {
+			return usageError("config check requires FILE")
+		}
+		file, err := modelconfig.Read(args[1])
+		if err != nil {
+			return err
+		}
+		selections, err := modelconfig.Selections(file)
+		if err != nil {
+			return err
+		}
+		if a.global.json {
+			return writeJSON(a.out, map[string]any{"valid": true, "models": len(file.Models), "enabled": len(selections)})
+		}
+		if !a.global.quiet {
+			fmt.Fprintf(a.out, "ok %d models, %d enabled\n", len(file.Models), len(selections))
+		}
+		return nil
+	default:
+		return usageError("unknown config command %q", args[0])
+	}
 }
 
 func (a *app) printSyncReport(report reconcile.Report) error {
@@ -676,43 +765,55 @@ Usage:
   mstore [global options] <command> [options]
 
 Commands:
-  scan             Inspect Hugging Face and ModelScope caches.
-  import           Publish one or more cached sources.
-  sync             Publish all ready cached revisions.
-  generate, gen    Generate a Bash model download script from stored manifests.
-  list, ls         List stored models and versions.
-  show             Show a model manifest.
-  path             Print a model's physical path.
-  activate         Atomically switch current.
-  rename           Rename a stored model.
-  verify           Verify stored files.
-  copy, cp         Copy into another local mstore.
-  remove, rm       Remove stored versions.
-  gc               Clean stale staging, parts, and locks.
-  doctor           Diagnose store and cache health.
-  completion       Generate shell completion.
-  help             Show this help.
+  scan                 Inspect Hugging Face and ModelScope caches.
+  import               Publish one or more cached sources.
+  sync                 Publish ready cached revisions.
+  config export        Export an editable model selection file.
+  config check         Validate a model selection file.
+  generate, gen        Generate a Bash download script from stored manifests.
+  list, ls             List stored models and versions.
+  show                 Show a model manifest.
+  path                 Print a model's physical path.
+  activate             Atomically switch current.
+  rename               Rename a stored model.
+  verify               Verify stored files.
+  copy, cp             Copy into another local mstore.
+  remove, rm           Remove stored versions.
+  gc                   Clean stale staging, parts, and locks.
+  doctor               Diagnose store and cache health.
+  completion           Generate shell completion.
+  help                 Show this help.
 
 Global options:
-  --store PATH   Store root (default: ${MSTORE_HOME:-~/models}).
-  --json         Emit stable JSON output.
-  -q, --quiet    Suppress normal output.
-  -v, -vv        Increase diagnostics.
-  --no-color     Disable color.
-  -V, --version  Show version.
+  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).
+  --json             Emit stable JSON output.
+  -q, --quiet        Suppress normal output.
+  -v, -vv            Increase diagnostics.
+  --no-color         Disable color.
+  -V, --version      Show version.
 
-Generate options:
-  --all           Generate commands for all published versions.
-  --current-only  With --all, generate commands only for current versions.
-  --uv            Run provider CLIs with uvx.
-  --hf-mirror     Route Hugging Face downloads through hf-mirror.com.
+Model config:
+  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]
+      Write ./models.toml by default. Existing files are protected unless
+      --overwrite is supplied.
+  mstore config check FILE
+      Validate a TOML model selection file.
+  mstore sync --config FILE [--activate] [--hash] [--jobs N] [--dry-run]
+      Publish only enabled, exact revisions in FILE.
 
-Import options:
-  --name NAME     Store the source under an explicit model name.
-  --version VER   Store the source under an explicit version prefix.
+Source references:
+  hf:NAMESPACE/REPO[@REVISION]
+  ms:NAMESPACE/REPO[@REVISION]
+
+Selected command options:
+  import:    --name NAME  --version VER  --activate  --hash  --jobs N  --dry-run
+  sync:      --provider hf|ms|all  --config FILE  --activate  --hash  --jobs N  --dry-run
+  generate:  --all  --current-only  --uv  --hf-mirror
 
 Examples:
   mstore sync
+  mstore config export
+  mstore sync --config models.toml --dry-run
   mstore generate --all > download-models.sh
   mstore generate --uv --hf-mirror --all > download-models.sh
 `)

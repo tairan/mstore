@@ -22,12 +22,21 @@ type Repository interface {
 type Scanner func(provider string) ([]source.Model, []error)
 
 type Options struct {
-	Provider string
-	Models   []string
-	Activate bool
-	Hash     bool
-	Jobs     int
-	DryRun   bool
+	Provider   string
+	Models     []string
+	Configured bool
+	Selections []Selection
+	Activate   bool
+	Hash       bool
+	Jobs       int
+	DryRun     bool
+}
+
+// Selection describes one exact cache revision selected by an editable model
+// config. Name is the destination model key.
+type Selection struct {
+	Source source.Ref
+	Name   string
 }
 
 type Item struct {
@@ -114,6 +123,9 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 	if opts.Jobs < 1 {
 		return report, SelectionError{Message: "--jobs must be at least 1"}
 	}
+	if len(opts.Models) > 0 && opts.Configured {
+		return report, SelectionError{Message: "model refs cannot be used with configured selections"}
+	}
 	existing, err := repo.List("")
 	if err != nil {
 		return report, err
@@ -156,8 +168,47 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 			return report, SelectionError{Message: fmt.Sprintf("model %q uses provider %s, excluded by --provider %s", name, key.provider, opts.Provider)}
 		}
 	}
+	selected := make(map[identity]Selection, len(opts.Selections))
+	for _, selection := range opts.Selections {
+		if selection.Source.Provider != "hf" && selection.Source.Provider != "ms" ||
+			selection.Source.Repo == "" || selection.Source.Revision == "" {
+			return report, SelectionError{Message: "configured selection requires provider, repository, and revision"}
+		}
+		if opts.Provider != "all" && selection.Source.Provider != opts.Provider {
+			return report, SelectionError{Message: fmt.Sprintf("configured source %s:%s is excluded by --provider %s", selection.Source.Provider, selection.Source.Repo, opts.Provider)}
+		}
+		key := repoKey{provider: selection.Source.Provider, repo: selection.Source.Repo}
+		id := identity{repoKey: key, revision: selection.Source.Revision}
+		if _, exists := selected[id]; exists {
+			return report, SelectionError{Message: fmt.Sprintf("configured source %s:%s@%s is duplicated", key.provider, key.repo, id.revision)}
+		}
+		if selection.Name == "" {
+			name, nameErr := naming.Normalize(selection.Source.Repo)
+			if nameErr != nil {
+				return report, SelectionError{Message: nameErr.Error()}
+			}
+			selection.Name = name
+		}
+		selected[id] = selection
+	}
 
-	models, scanErrs := scan(opts.Provider)
+	if opts.Configured && len(selected) == 0 {
+		return report, nil
+	}
+	scanProvider := opts.Provider
+	if opts.Configured && scanProvider == "all" {
+		for id := range selected {
+			if scanProvider == "all" {
+				scanProvider = id.provider
+				continue
+			}
+			if scanProvider != id.provider {
+				scanProvider = "all"
+				break
+			}
+		}
+	}
+	models, scanErrs := scan(scanProvider)
 	var firstFailure error
 	for _, scanErr := range scanErrs {
 		var providerErr providers.ScanError
@@ -194,7 +245,13 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 		}
 		seenIdentity[id] = true
 		names := namesByRepo[key]
-		if len(requested) > 0 {
+		selection, configured := selected[id]
+		if opts.Configured && !configured {
+			continue
+		}
+		if configured {
+			names = []string{selection.Name}
+		} else if len(requested) > 0 {
 			names = selectedNames(names, requested)
 			if len(names) == 0 {
 				continue
@@ -220,20 +277,39 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 			})
 		}
 	}
+	if opts.Configured {
+		matched := make(map[identity]bool, len(candidates))
+		for _, candidate := range candidates {
+			matched[identity{repoKey: candidate.key, revision: candidate.model.Revision}] = true
+		}
+		for id := range selected {
+			if matched[id] {
+				continue
+			}
+			report.Results = append(report.Results, Item{
+				Operation: "import", Status: "failed",
+				Source: id.provider + ":" + id.repo + "@" + id.revision,
+				Error:  "selected source is not ready in provider cache",
+			})
+			if firstFailure == nil {
+				firstFailure = fmt.Errorf("selected source is not ready in provider cache")
+			}
+		}
+	}
 
 	conflicted := preflightConflicts(candidates, reposByName)
 	modelCandidates := map[string][]candidate{}
 	var imports []candidate
 	for _, candidate := range candidates {
 		modelCandidates[candidate.name] = append(modelCandidates[candidate.name], candidate)
-		if message := conflicted[candidate.key]; message != "" {
+		if message := conflicted[candidateKey(candidate)]; message != "" {
 			report.Results = append(report.Results, Item{
 				Operation: "import", Status: "conflict", Source: candidate.model.Ref(),
 				Name: candidate.name, Error: message,
 			})
 			continue
 		}
-		if candidate.version != "" {
+		if candidate.version != "" && !opts.Hash {
 			report.Results = append(report.Results, Item{
 				Operation: "import", Status: "skipped", Source: candidate.model.Ref(),
 				Name: candidate.name, Version: candidate.version,
@@ -262,7 +338,7 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 	if opts.Activate {
 		names := make([]string, 0, len(modelCandidates))
 		for name, candidates := range modelCandidates {
-			if conflicted[candidates[0].key] == "" {
+			if hasNoConflicts(candidates, conflicted) {
 				names = append(names, name)
 			}
 		}
@@ -304,13 +380,29 @@ func selectedNames(names []string, requested map[string]bool) []string {
 	return selected
 }
 
-func preflightConflicts(candidates []candidate, existing map[string]repoKey) map[repoKey]string {
-	conflicted := map[repoKey]string{}
+func candidateKey(candidate candidate) namedIdentity {
+	return namedIdentity{
+		identity: identity{repoKey: candidate.key, revision: candidate.model.Revision},
+		name:     candidate.name,
+	}
+}
+
+func hasNoConflicts(candidates []candidate, conflicted map[namedIdentity]string) bool {
+	for _, candidate := range candidates {
+		if conflicted[candidateKey(candidate)] != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func preflightConflicts(candidates []candidate, existing map[string]repoKey) map[namedIdentity]string {
+	conflicted := map[namedIdentity]string{}
 	keysByName := map[string]map[repoKey]bool{}
 	for _, candidate := range candidates {
 		if owner, ok := existing[candidate.name]; ok {
 			if owner != candidate.key {
-				conflicted[candidate.key] = fmt.Sprintf(
+				conflicted[candidateKey(candidate)] = fmt.Sprintf(
 					"model name %q is already used by %s:%s; import explicitly with --name",
 					candidate.name, owner.provider, owner.repo,
 				)
@@ -326,10 +418,12 @@ func preflightConflicts(candidates []candidate, existing map[string]repoKey) map
 		if len(keys) < 2 {
 			continue
 		}
-		for key := range keys {
-			conflicted[key] = fmt.Sprintf(
-				"multiple new repositories normalize to %q; import each explicitly with --name", name,
-			)
+		for _, candidate := range candidates {
+			if candidate.name == name && keys[candidate.key] {
+				conflicted[candidateKey(candidate)] = fmt.Sprintf(
+					"multiple new repositories normalize to %q; import each explicitly with --name", name,
+				)
+			}
 		}
 	}
 	return conflicted
