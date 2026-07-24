@@ -388,7 +388,7 @@ func TestCLIGenerateRejectsDifferentAliasInventories(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := run([]string{"--store", storeRoot, "--json", "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
-	if code != 1 || !strings.Contains(errOut.String(), "different stored file inventories") {
+	if code != 1 || !strings.Contains(errOut.String(), "different stored content") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
@@ -457,7 +457,40 @@ func TestCLIGenerateRejectsAliasHashMismatch(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := run([]string{"--store", storeRoot, "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
-	if code != 1 || !strings.Contains(errOut.String(), "different stored file inventories") {
+	if code != 1 || !strings.Contains(errOut.String(), "different stored content") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLIGenerateRejectsAliasContentMismatchWithoutHashes(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := "1111111111111111111111111111111111111111"
+	version := ""
+	for _, name := range []string{"widget-a", "widget-b"} {
+		dir := t.TempDir()
+		content := []byte("a")
+		if name == "widget-b" {
+			content = []byte("b")
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		result, err := s.Import(source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}, store.ImportOptions{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version == "" {
+			version = result.Version
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "different stored content") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }

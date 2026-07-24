@@ -134,6 +134,13 @@ func (s *Store) Import(src source.Model, opts ImportOptions) (ImportResult, erro
 	if existing {
 		result.Skipped = true
 		if opts.Hash {
+			stored, storedBytes, scanErr := fsutil.Scan(result.Path, true)
+			if scanErr != nil {
+				return result, fmt.Errorf("scan existing version: %w", scanErr)
+			}
+			if storedBytes != bytes || !fsutil.SameTree(stored, before, true) {
+				return result, fmt.Errorf("existing version differs from source content; refusing to record hashes")
+			}
 			m, readErr := manifest.Read(result.Path)
 			if readErr != nil {
 				return result, readErr

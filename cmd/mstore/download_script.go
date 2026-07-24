@@ -148,6 +148,19 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
+		if len(group.models) > 0 {
+			existingFiles, _, scanErr := fsutil.Scan(group.models[0].Path, true)
+			if scanErr != nil {
+				return plan, fmt.Errorf("%s@%s: scan alias inventory: %w", group.models[0].Name, group.models[0].Version, scanErr)
+			}
+			currentFiles, _, scanErr := fsutil.Scan(v.Path, true)
+			if scanErr != nil {
+				return plan, fmt.Errorf("%s@%s: scan alias inventory: %w", v.Name, v.Version, scanErr)
+			}
+			if !fsutil.SameTree(existingFiles, currentFiles, true) {
+				return plan, fmt.Errorf("%s@%s: selected aliases for %s have different stored content; generate them separately", v.Name, v.Version, key.Provider+":"+key.Repo+"@"+key.Revision)
+			}
+		}
 		if len(v.Manifest.Entries) == 0 {
 			group.selective = false
 			group.inventory = nil

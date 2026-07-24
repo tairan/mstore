@@ -83,6 +83,21 @@ func TestHashImportUpgradesExistingManifest(t *testing.T) {
 	}
 }
 
+func TestHashImportRejectsTamperedExistingVersion(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	src := fixtureSource(t, "Acme/HashTamper", "0123456789abcdef0123456789abcdef")
+	first, err := s.Import(src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first.Path, "config.json"), []byte("xx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Import(src, ImportOptions{Hash: true}); err == nil {
+		t.Fatal("expected tampered existing version to be rejected")
+	}
+}
+
 func TestVerifyDetectsTamperAndCopyIsIdempotent(t *testing.T) {
 	srcStore, _ := Open(t.TempDir())
 	src := fixtureSource(t, "Acme/Model", "fedcba9876543210fedcba9876543210")
