@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/chieworks/mstore/internal/copier"
 	"github.com/chieworks/mstore/internal/fsutil"
@@ -200,7 +201,7 @@ func (s *Store) chooseVersion(name string, src source.Model, requested string, f
 		return "", false, fmt.Errorf("immutable source revision is required")
 	}
 	if requested != "" {
-		if !strings.HasPrefix(src.Revision, requested) || strings.ContainsAny(requested, `/\`) {
+		if !validVersionPrefix(requested) || !strings.HasPrefix(src.Revision, requested) {
 			return "", false, fmt.Errorf("invalid requested version %q for revision %q", requested, src.Revision)
 		}
 		return s.checkVersionPath(name, requested, src, files, bytes)
@@ -221,6 +222,11 @@ func (s *Store) chooseVersion(name string, src source.Model, requested string, f
 		}
 	}
 	return "", false, fmt.Errorf("full revision collision for %s", src.Revision)
+}
+
+func validVersionPrefix(version string) bool {
+	return version != "" && version != "." && version != ".." && version != "current" &&
+		!strings.ContainsAny(version, `/\\`) && !strings.ContainsFunc(version, unicode.IsControl)
 }
 
 type versionCollisionError struct{ version string }

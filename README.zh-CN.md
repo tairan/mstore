@@ -176,8 +176,10 @@ manifest 中记录的名称和版本执行定向的 `mstore import`，因此能�
 也不会把目标机上其他 ready 缓存导入；当前版本会使用 `--activate`。目标机器
 需保证 `mstore` 在 `PATH` 中。非提交 ID 的 ModelScope revision 会附带警告，
 因为脚本执行前它可能发生变化。目标仓库不是默认路径时可设置
-`MSTORE_STORE=/destination`。Hugging Face 命令会携带已发布的文件清单，避免把
-部分 snapshot 扩展为完整仓库。`--json` 会输出所选模型和生成脚本组成的一个 JSON 值。
+`MSTORE_STORE=/destination`。各 provider 下载命令都会携带已发布的文件清单，避免把
+部分 snapshot 扩展为完整仓库。如果多个别名指向同一来源但文件清单不同，生成会直接
+报错，避免把一个别名的文件错误发布到另一个别名。`--json` 会输出所选模型和生成脚本
+组成的一个 JSON 值。
 
 维护命令：
 

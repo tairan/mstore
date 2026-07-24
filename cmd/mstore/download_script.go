@@ -123,8 +123,9 @@ func sortedVersions(selected map[string]store.Version) []store.Version {
 func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (downloadScriptPlan, error) {
 	plan := downloadScriptPlan{}
 	type sourceGroup struct {
-		files  map[string]bool
-		models []store.Version
+		files     map[string]bool
+		models    []store.Version
+		inventory []manifest.File
 	}
 	groups := make(map[downloadSourceKey]*sourceGroup, len(versions))
 	var orderedKeys []downloadSourceKey
@@ -144,11 +145,14 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
+		if len(group.inventory) == 0 {
+			group.inventory = append([]manifest.File(nil), files...)
+		} else if !fsutil.SameTree(group.inventory, files, false) {
+			return plan, fmt.Errorf("%s@%s: selected aliases for %s have different stored file inventories; generate them separately", v.Name, v.Version, key.Provider+":"+key.Repo+"@"+key.Revision)
+		}
 		group.models = append(group.models, v)
-		if src.Provider == "hf" {
-			for _, file := range files {
-				group.files[file.Path] = true
-			}
+		for _, file := range files {
+			group.files[file.Path] = true
 		}
 	}
 	commands := make(map[downloadSourceKey]downloadScriptCommand, len(groups))
@@ -329,7 +333,11 @@ func downloadCommand(provider, repo, revision string, files []string, opts downl
 			command = "HF_ENDPOINT=" + shellQuote(hfMirrorEndpoint) + " " + command
 		}
 	case "ms":
-		command = "modelscope download --model " + shellQuote(repo) + " --revision " + shellQuote(revision)
+		command = "modelscope download --model " + shellQuote(repo)
+		for _, file := range files {
+			command += " " + shellQuote(file)
+		}
+		command += " --revision " + shellQuote(revision)
 		if opts.UseUV {
 			command = "uvx " + command
 		}

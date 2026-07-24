@@ -172,7 +172,7 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	code = run([]string{"--store", storeRoot, "generate", "--all"}, &out, &errOut)
-	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master'"
+	want := "modelscope download --model 'Qwen/Demo-0.6B' 'config.json' --revision 'master'"
 	if code != 0 || !strings.Contains(out.String(), want) {
 		t.Fatalf("generate code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
@@ -252,7 +252,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	for _, command := range []string{
 		"hf download 'Acme/Widget' 'config.json' --revision '" + oldRevision + "'",
 		"hf download 'Acme/Widget' 'config.json' --revision '" + currentRevision + "'",
-		"modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
+		"modelscope download --model 'Qwen/Demo' 'config.json' --revision '" + msRevision + "'",
 	} {
 		if !strings.Contains(got, command) {
 			t.Fatalf("generated script missing %q:\n%s", command, got)
@@ -279,7 +279,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	uvScript := out.String()
 	for _, command := range []string{
 		"uvx --from huggingface_hub hf download 'Acme/Widget' 'config.json' --revision '" + oldRevision + "'",
-		"uvx modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
+		"uvx modelscope download --model 'Qwen/Demo' 'config.json' --revision '" + msRevision + "'",
 	} {
 		if code != 0 || !strings.Contains(uvScript, command) {
 			t.Fatalf("uv: code=%d stdout=%q stderr=%q", code, uvScript, errOut.String())
@@ -295,7 +295,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	mirrorScript := out.String()
 	if code != 0 ||
 		!strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' hf download 'Acme/Widget' 'config.json' --revision '"+oldRevision+"'") ||
-		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") ||
+		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' 'config.json' --revision '"+msRevision+"'") ||
 		strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' modelscope") {
 		t.Fatalf("hf-mirror: code=%d stdout=%q stderr=%q", code, mirrorScript, errOut.String())
 	}
@@ -306,7 +306,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	combinedScript := out.String()
 	if code != 0 ||
 		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' 'config.json' --revision '"+oldRevision+"'") ||
-		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") {
+		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' 'config.json' --revision '"+msRevision+"'") {
 		t.Fatalf("uv with hf-mirror: code=%d stdout=%q stderr=%q", code, combinedScript, errOut.String())
 	}
 
@@ -347,7 +347,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	}
 }
 
-func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
+func TestCLIGenerateRejectsDifferentAliasInventories(t *testing.T) {
 	storeRoot := t.TempDir()
 	s, err := store.Open(storeRoot)
 	if err != nil {
@@ -377,6 +377,35 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 
 	var out, errOut bytes.Buffer
 	code := run([]string{"--store", storeRoot, "--json", "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "different stored file inventories") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := "1111111111111111111111111111111111111111"
+	version := ""
+	for _, name := range []string{"widget-a", "widget-b"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		result, err := s.Import(source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}, store.ImportOptions{Name: name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version == "" {
+			version = result.Version
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "--json", "generate", "widget-a@" + version, "widget-b@" + version}, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
@@ -384,18 +413,8 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Models) != 2 || plan.Models[0].Name != "widget-a" || plan.Models[1].Name != "widget-b" {
-		t.Fatalf("models=%#v", plan.Models)
-	}
-	command := "hf download 'Acme/Widget' 'config.json' 'weights.bin' --revision '" + revision + "'"
-	if strings.Count(plan.Script, command) != 1 {
-		t.Fatalf("duplicate source command count=%d script=%q", strings.Count(plan.Script, command), plan.Script)
-	}
-	for _, name := range []string{"widget-a", "widget-b"} {
-		want := "mstore --store \"$MSTORE_STORE\" import --name '" + name + "' --version '" + version + "' 'hf:Acme/Widget@" + revision + "'"
-		if !strings.Contains(plan.Script, want) {
-			t.Fatalf("missing alias import %q in %q", want, plan.Script)
-		}
+	if len(plan.Models) != 2 || strings.Count(plan.Script, "hf download 'Acme/Widget' 'config.json'") != 1 {
+		t.Fatalf("models=%#v script=%q", plan.Models, plan.Script)
 	}
 }
 
@@ -425,8 +444,8 @@ func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	script := out.String()
-	first := "modelscope download --model 'Qwen/Demo' --revision 'master'"
-	second := "modelscope download --model 'Qwen/Demo' --revision 'release'"
+	first := "modelscope download --model 'Qwen/Demo' 'config.json' --revision 'master'"
+	second := "modelscope download --model 'Qwen/Demo' 'config.json' --revision 'release'"
 	if !strings.Contains(script, first) || !strings.Contains(script, second) ||
 		strings.Count(script, "mstore --store \"$MSTORE_STORE\" import --name 'demo'") != 2 ||
 		!strings.Contains(script, "WARNING: ModelScope revision Qwen/Demo@master") {

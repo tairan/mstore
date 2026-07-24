@@ -190,8 +190,10 @@ name and version, preserving aliases and avoiding unrelated ready caches on the
 destination. Active versions are imported with `--activate`. `mstore` must be
 available on `PATH`. Set `MSTORE_STORE=/destination` when the target store is
 not the default. Non-commit ModelScope revisions are marked with a warning
-because they may move before the script runs. Hugging Face commands include the
-published file inventory so partial snapshots are not expanded.
+because they may move before the script runs. Provider download commands include
+the published file inventory so partial snapshots are not expanded. If aliases
+share a source but have different inventories, generation stops rather than
+silently publishing one alias with another alias's files.
 `--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:

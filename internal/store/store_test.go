@@ -104,6 +104,14 @@ func TestNameConflictAndRemoveCurrentGuard(t *testing.T) {
 	}
 }
 
+func TestImportRejectsReservedCurrentVersion(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	src := fixtureSource(t, "Acme/Current", "current-release")
+	if _, err := s.Import(src, ImportOptions{Name: "current", Version: "current"}); err == nil {
+		t.Fatal("expected reserved current version to be rejected")
+	}
+}
+
 func TestConcurrentImportAndResumablePart(t *testing.T) {
 	s, _ := Open(t.TempDir())
 	src := fixtureSource(t, "Acme/Concurrent", "1234567890abcdef1234567890abcdef")
