@@ -197,6 +197,8 @@ silently publishing one alias with another alias's files.
 Each source uses a temporary isolated provider cache, which is removed when the
 script exits. Versions imported with recorded hashes are re-imported with
 `--hash` so full verification remains available on the destination.
+For older manifests without a recorded inventory, the script warns and downloads
+the full revision instead of pretending a selective reconstruction is exact.
 `--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:

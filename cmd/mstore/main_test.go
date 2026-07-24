@@ -172,7 +172,7 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 	out.Reset()
 	errOut.Reset()
 	code = run([]string{"--store", storeRoot, "generate", "--all"}, &out, &errOut)
-	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master' -- 'config.json'"
+	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master'"
 	if code != 0 || !strings.Contains(out.String(), want) {
 		t.Fatalf("generate code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
@@ -250,9 +250,9 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	}
 	got := out.String()
 	for _, command := range []string{
-		"hf download 'Acme/Widget' --revision '" + oldRevision + "' -- 'config.json'",
-		"hf download 'Acme/Widget' --revision '" + currentRevision + "' -- 'config.json'",
-		"modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "' -- 'config.json'",
+		"hf download 'Acme/Widget' --revision '" + oldRevision + "'",
+		"hf download 'Acme/Widget' --revision '" + currentRevision + "'",
+		"modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
 	} {
 		if !strings.Contains(got, command) {
 			t.Fatalf("generated script missing %q:\n%s", command, got)
@@ -289,8 +289,8 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--uv", "--all"}, &out, &errOut)
 	uvScript := out.String()
 	for _, command := range []string{
-		"uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + oldRevision + "' -- 'config.json'",
-		"uvx modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "' -- 'config.json'",
+		"uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + oldRevision + "'",
+		"uvx modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
 	} {
 		if code != 0 || !strings.Contains(uvScript, command) {
 			t.Fatalf("uv: code=%d stdout=%q stderr=%q", code, uvScript, errOut.String())
@@ -305,8 +305,8 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--hf-mirror", "--all"}, &out, &errOut)
 	mirrorScript := out.String()
 	if code != 0 ||
-		!strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' hf download 'Acme/Widget' --revision '"+oldRevision+"' -- 'config.json'") ||
-		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"' -- 'config.json'") ||
+		!strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' hf download 'Acme/Widget' --revision '"+oldRevision+"'") ||
+		!strings.Contains(mirrorScript, "modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") ||
 		strings.Contains(mirrorScript, "HF_ENDPOINT='https://hf-mirror.com' modelscope") {
 		t.Fatalf("hf-mirror: code=%d stdout=%q stderr=%q", code, mirrorScript, errOut.String())
 	}
@@ -316,8 +316,8 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	code = run([]string{"--store", storeRoot, "generate", "--uv", "--hf-mirror", "--all"}, &out, &errOut)
 	combinedScript := out.String()
 	if code != 0 ||
-		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '"+oldRevision+"' -- 'config.json'") ||
-		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"' -- 'config.json'") {
+		!strings.Contains(combinedScript, "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '"+oldRevision+"'") ||
+		!strings.Contains(combinedScript, "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") {
 		t.Fatalf("uv with hf-mirror: code=%d stdout=%q stderr=%q", code, combinedScript, errOut.String())
 	}
 
@@ -352,7 +352,7 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + currentRevision + "' -- 'config.json'"
+	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + currentRevision + "'"
 	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || !plan.Models[0].Current || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
 		t.Fatalf("unexpected JSON plan: %s", out.String())
 	}
@@ -377,7 +377,7 @@ func TestCLIGenerateRejectsDifferentAliasInventories(t *testing.T) {
 			}
 		}
 		src := source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}
-		result, err := s.Import(src, store.ImportOptions{Name: name})
+		result, err := s.Import(src, store.ImportOptions{Name: name, Hash: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -424,7 +424,7 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
 		t.Fatal(err)
 	}
-	if len(plan.Models) != 2 || strings.Count(plan.Script, "hf download 'Acme/Widget' --revision '"+revision+"' -- 'config.json'") != 1 {
+	if len(plan.Models) != 2 || strings.Count(plan.Script, "hf download 'Acme/Widget' --revision '"+revision+"'") != 1 {
 		t.Fatalf("models=%#v script=%q", plan.Models, plan.Script)
 	}
 }
@@ -488,8 +488,8 @@ func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	script := out.String()
-	first := "modelscope download --model 'Qwen/Demo' --revision 'master' -- 'config.json'"
-	second := "modelscope download --model 'Qwen/Demo' --revision 'release' -- 'config.json'"
+	first := "modelscope download --model 'Qwen/Demo' --revision 'master'"
+	second := "modelscope download --model 'Qwen/Demo' --revision 'release'"
 	if !strings.Contains(script, first) || !strings.Contains(script, second) ||
 		strings.Count(script, "mstore --store \"$MSTORE_STORE\" import --name 'demo'") != 2 ||
 		!strings.Contains(script, "WARNING: ModelScope revision Qwen/Demo@master") {

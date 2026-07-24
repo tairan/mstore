@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/chieworks/mstore/internal/manifest"
 	"github.com/chieworks/mstore/internal/source"
 )
 
@@ -62,6 +63,23 @@ func TestImportIsIdempotentAndDereferences(t *testing.T) {
 	}
 	if _, err := s.Verify("fancy-model", true, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHashImportUpgradesExistingManifest(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	src := fixtureSource(t, "Acme/HashUpgrade", "0123456789abcdef0123456789abcdef")
+	first, err := s.Import(src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Import(src, ImportOptions{Hash: true})
+	if err != nil || !second.Skipped || second.Path != first.Path {
+		t.Fatalf("upgrade import: %#v %v", second, err)
+	}
+	m, err := manifest.Read(first.Path)
+	if err != nil || !manifestHasCompleteHashes(m) {
+		t.Fatalf("manifest hashes not upgraded: %#v %v", m, err)
 	}
 }
 

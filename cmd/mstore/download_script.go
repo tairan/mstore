@@ -127,9 +127,11 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		files     map[string]bool
 		models    []store.Version
 		inventory []manifest.File
+		selective bool
 	}
 	groups := make(map[downloadSourceKey]*sourceGroup, len(versions))
 	var orderedKeys []downloadSourceKey
+	fullSnapshots := make(map[downloadSourceKey]bool)
 	for _, v := range versions {
 		src := v.Manifest.Source
 		if _, err := source.ParseRef(src.Provider + ":" + src.Repo + "@" + src.Revision); err != nil {
@@ -138,7 +140,7 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		key := downloadSourceKey{Provider: src.Provider, Repo: src.Repo, Revision: src.Revision}
 		group := groups[key]
 		if group == nil {
-			group = &sourceGroup{files: make(map[string]bool)}
+			group = &sourceGroup{files: make(map[string]bool), selective: true}
 			groups[key] = group
 			orderedKeys = append(orderedKeys, key)
 		}
@@ -146,14 +148,20 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
-		if len(group.inventory) == 0 {
+		if len(v.Manifest.Entries) == 0 {
+			group.selective = false
+			group.inventory = nil
+			group.files = make(map[string]bool)
+		} else if group.selective && len(group.inventory) == 0 {
 			group.inventory = append([]manifest.File(nil), files...)
-		} else if !fsutil.SameTree(group.inventory, files, hasHashes(group.inventory) && hasHashes(files)) {
+		} else if group.selective && !fsutil.SameTree(group.inventory, files, hasHashes(group.inventory) && hasHashes(files)) {
 			return plan, fmt.Errorf("%s@%s: selected aliases for %s have different stored file inventories; generate them separately", v.Name, v.Version, key.Provider+":"+key.Repo+"@"+key.Revision)
 		}
 		group.models = append(group.models, v)
-		for _, file := range files {
-			group.files[file.Path] = true
+		if group.selective {
+			for _, file := range files {
+				group.files[file.Path] = true
+			}
 		}
 	}
 	commands := make(map[downloadSourceKey]downloadScriptCommand, len(groups))
@@ -173,6 +181,16 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		commands[key] = downloadScriptCommand{
 			Commands: command,
 			Models:   group.models,
+		}
+		if !group.selective {
+			fullSnapshots[key] = true
+		}
+		if fullSnapshots[key] {
+			warning := "manifest for " + key.Provider + ":" + key.Repo + "@" + key.Revision + " has no complete file inventory; the generated script downloads the full snapshot."
+			if !seenWarnings[warning] {
+				seenWarnings[warning] = true
+				warnings = append(warnings, warning)
+			}
 		}
 		if key.Provider == "ms" && !isImmutableModelScopeRevision(key.Revision) {
 			warning := "ModelScope revision " + key.Repo + "@" + key.Revision + " is not an immutable commit ID; it may move before the script runs."

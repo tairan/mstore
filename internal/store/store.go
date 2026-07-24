@@ -133,6 +133,18 @@ func (s *Store) Import(src source.Model, opts ImportOptions) (ImportResult, erro
 	result.Path = filepath.Join(s.Root, name, version)
 	if existing {
 		result.Skipped = true
+		if opts.Hash {
+			m, readErr := manifest.Read(result.Path)
+			if readErr != nil {
+				return result, readErr
+			}
+			if !manifestHasCompleteHashes(m) {
+				m.Entries = before
+				if err := manifest.Write(result.Path, m); err != nil {
+					return result, err
+				}
+			}
+		}
 		if opts.Activate {
 			err = s.activateLocked(name, version, true)
 		}
@@ -194,6 +206,18 @@ func (s *Store) Import(src source.Model, opts ImportOptions) (ImportResult, erro
 		}
 	}
 	return result, nil
+}
+
+func manifestHasCompleteHashes(m manifest.Manifest) bool {
+	if len(m.Entries) != m.Files || len(m.Entries) == 0 {
+		return false
+	}
+	for _, entry := range m.Entries {
+		if entry.SHA256 == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) chooseVersion(name string, src source.Model, requested string, files []manifest.File, bytes int64) (string, bool, error) {
