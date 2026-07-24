@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/chieworks/mstore/internal/manifest"
 	"github.com/chieworks/mstore/internal/source"
 )
 
@@ -53,11 +54,47 @@ func TestImportIsIdempotentAndDereferences(t *testing.T) {
 		t.Fatal("published provider symlink was not dereferenced")
 	}
 	got, err := s.Resolve("fancy-model")
-	if err != nil || got.Path != first.Path {
+	if err != nil || got.Path != first.Path || !got.Current {
 		t.Fatalf("resolve: %#v, %v", got, err)
+	}
+	got, err = s.Resolve("fancy-model@" + first.Version)
+	if err != nil || !got.Current {
+		t.Fatalf("explicit current resolve: %#v, %v", got, err)
 	}
 	if _, err := s.Verify("fancy-model", true, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHashImportUpgradesExistingManifest(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	src := fixtureSource(t, "Acme/HashUpgrade", "0123456789abcdef0123456789abcdef")
+	first, err := s.Import(src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.Import(src, ImportOptions{Hash: true})
+	if err != nil || !second.Skipped || second.Path != first.Path {
+		t.Fatalf("upgrade import: %#v %v", second, err)
+	}
+	m, err := manifest.Read(first.Path)
+	if err != nil || !manifestHasCompleteHashes(m) {
+		t.Fatalf("manifest hashes not upgraded: %#v %v", m, err)
+	}
+}
+
+func TestHashImportRejectsTamperedExistingVersion(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	src := fixtureSource(t, "Acme/HashTamper", "0123456789abcdef0123456789abcdef")
+	first, err := s.Import(src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(first.Path, "config.json"), []byte("xx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Import(src, ImportOptions{Hash: true}); err == nil {
+		t.Fatal("expected tampered existing version to be rejected")
 	}
 }
 
@@ -97,6 +134,14 @@ func TestNameConflictAndRemoveCurrentGuard(t *testing.T) {
 	}
 	if _, err := s.Remove("same@aaaaaaaaaaaa", false, false, false, false); err == nil {
 		t.Fatal("expected current removal guard")
+	}
+}
+
+func TestImportRejectsReservedCurrentVersion(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	src := fixtureSource(t, "Acme/Current", "current-release")
+	if _, err := s.Import(src, ImportOptions{Name: "current", Version: "current"}); err == nil {
+		t.Fatal("expected reserved current version to be rejected")
 	}
 }
 

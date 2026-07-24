@@ -3,6 +3,7 @@ package source
 import (
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 type Model struct {
@@ -32,6 +33,9 @@ func ParseRef(s string) (Ref, error) {
 	r.Provider, s = s[:i], s[i+1:]
 	if r.Provider != "hf" && r.Provider != "ms" {
 		return r, fmt.Errorf("unknown provider %q", r.Provider)
+	}
+	if strings.IndexFunc(s, unicode.IsControl) >= 0 {
+		return r, fmt.Errorf("repository and revision must not contain control characters")
 	}
 	if at := strings.LastIndexByte(s, '@'); at >= 0 {
 		r.Repo, r.Revision = s[:at], s[at+1:]

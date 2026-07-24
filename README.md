@@ -5,8 +5,9 @@
 [![CI](https://github.com/tairan/mstore/actions/workflows/ci.yml/badge.svg)](https://github.com/tairan/mstore/actions/workflows/ci.yml)
 
 `mstore` publishes models that are already present in the native Hugging Face
-or ModelScope cache into a portable, immutable local model store. It never
-downloads models and never writes to provider caches.
+or ModelScope cache into a portable, immutable local model store. It does not
+download models itself or write to provider caches, but it can generate a
+provider download script from published model manifests.
 
 The resulting directories are ordinary files, so they can be mounted
 read-only into containers, copied to mounted disks, backed up, or moved to
@@ -73,6 +74,8 @@ Only `models/<namespace>/<repo>` is accepted. Each model must have a valid
 `Revision:<revision>,CreatedAt:<time>` representation are understood.
 Historical `hub/<namespace>/<repo>` layouts are deliberately rejected as
 unsupported rather than probed or guessed.
+ModelScope encodes dots in cache directory names as `___`; mstore restores
+them in displayed source IDs, manifests, and generated download commands.
 
 ## Store layout
 
@@ -154,6 +157,50 @@ mstore copy --to /mnt/backup --all --all-versions
 There is intentionally no SSH, SFTP, or object-storage transport. Mount that
 storage first and pass its path.
 
+Generate a download script instead of copying large model files to another
+machine:
+
+```sh
+mstore generate --all > download-models.sh
+bash download-models.sh
+```
+
+Use `--uv` when the destination machine should run the provider CLIs through
+uv, and combine it with `--hf-mirror` to route Hugging Face downloads through
+HF-Mirror:
+
+```sh
+mstore generate --uv --hf-mirror --all > download-models.sh
+```
+
+The generated Bash script uses each manifest's recorded provider, repository,
+and revision: `hf download REPO --revision REVISION` for Hugging Face and
+`modelscope download --model REPO --revision REVISION` for ModelScope. Install
+the relevant provider CLIs first and authenticate before downloading private or
+gated models. With `--uv`, the script uses `uvx --from huggingface_hub hf` and `uvx modelscope`
+instead, so only uv needs to be installed. `--hf-mirror` prefixes only Hugging
+Face commands with `HF_ENDPOINT=https://hf-mirror.com`. `--all` includes every
+published version; use
+`--current-only` to export only active versions. Explicit `model` or
+`model@version` arguments are also accepted; a bare model name resolves its
+`current` version. `gen` is available as a short alias. Identical
+provider/repository/revision combinations are emitted once. After each source
+download, the script runs a source-specific `mstore import` with the recorded
+name and version, preserving aliases and avoiding unrelated ready caches on the
+destination. Active versions are imported with `--activate`. `mstore` must be
+available on `PATH`. Set `MSTORE_STORE=/destination` when the target store is
+not the default. Non-commit ModelScope revisions are marked with a warning
+because they may move before the script runs. Provider download commands include
+the published file inventory so partial snapshots are not expanded. If aliases
+share a source but have different inventories, generation stops rather than
+silently publishing one alias with another alias's files.
+Each source uses a temporary isolated provider cache, which is removed when the
+script exits. Versions imported with recorded hashes are re-imported with
+`--hash` so full verification remains available on the destination.
+For older manifests without a recorded inventory, the script warns and downloads
+the full revision instead of pretending a selective reconstruction is exact.
+`--json` returns the selected models and generated script as a single JSON value.
+
 Maintenance commands:
 
 ```sh
@@ -173,7 +220,7 @@ models or provider caches.
 Top-level commands:
 
 ```text
-scan import sync list(ls) show path activate rename verify
+scan import sync generate list(ls) show path activate rename verify
 copy(cp) remove(rm) gc doctor completion help
 ```
 
@@ -190,8 +237,10 @@ Provider references use `hf:namespace/repo[@revision]` or
 Important command options:
 
 - `scan`: `--provider`, `--ready-only`, `--new-only`, `--long`
-- `import`: `--name`, `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `import`: `--name`, `--version`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `sync`: `--provider`, `--activate`, `--hash`, `--jobs`, `--dry-run`
+- `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`;
+  `--uv`; `--hf-mirror`
 - `list`: `--versions`, `--source`, `--long`
 - `show`: `--files`, `--hashes`
 - `path`: `--link`
@@ -213,4 +262,5 @@ other runtime failures use `1`.
 ## Scope
 
 mstore does not download, convert, merge, quantize, infer with, or evaluate
-models. It has no web UI, registry server, database, or remote transport.
+models itself. It can generate provider CLI download scripts, but it has no
+web UI, registry server, database, or remote transport.

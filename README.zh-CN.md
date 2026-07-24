@@ -5,7 +5,8 @@
 [![CI](https://github.com/tairan/mstore/actions/workflows/ci.yml/badge.svg)](https://github.com/tairan/mstore/actions/workflows/ci.yml)
 
 `mstore` 将 Hugging Face 或 ModelScope 原生缓存中已经下载完成的模型发布到
-便携、不可变的本地模型仓库。它不会下载模型，也不会写入 provider 缓存。
+便携、不可变的本地模型仓库。它自身不会下载模型，也不会写入 provider 缓存，
+但可以根据已发布模型的 manifest 生成 provider 下载脚本。
 
 发布后的目录只包含普通文件，因此可以只读挂载到容器、复制到已挂载磁盘、
 进行备份，或在没有数据库的情况下迁移到其他机器。
@@ -69,6 +70,8 @@ ModelScope 缓存按以下顺序查找：
 既支持纯 revision，也支持 ModelScope 的
 `Revision:<revision>,CreatedAt:<time>` 表示形式。历史
 `hub/<namespace>/<repo>` 布局会被明确判定为不支持，不会进行探测或猜测。
+ModelScope 会将缓存目录名中的 `.` 编码为 `___`；mstore 会在展示的 source ID、
+manifest 和生成的下载命令中还原为 `.`。
 
 ## 仓库布局
 
@@ -144,6 +147,43 @@ mstore copy --to /mnt/backup --all --all-versions
 
 项目有意不实现 SSH、SFTP 或对象存储传输。请先挂载相应存储，再传入其路径。
 
+当复制大模型到另一台机器过慢时，可以根据当前仓库生成下载脚本：
+
+```sh
+mstore generate --all > download-models.sh
+bash download-models.sh
+```
+
+目标机器希望通过 uv 运行 provider CLI 时可使用 `--uv`；与 `--hf-mirror`
+组合可让 Hugging Face 下载走 HF-Mirror：
+
+```sh
+mstore generate --uv --hf-mirror --all > download-models.sh
+```
+
+生成的 Bash 脚本会使用 manifest 中记录的 provider、仓库和 revision：Hugging
+Face 使用 `hf download REPO --revision REVISION`，ModelScope 使用
+`modelscope download --model REPO --revision REVISION`。执行前请安装相应的
+provider CLI；私有或受限模型还需要先完成认证。使用 `--uv` 时，脚本改为
+调用 `uvx --from huggingface_hub hf` 与 `uvx modelscope`，目标机器只需安装 uv。`--hf-mirror` 仅为
+Hugging Face 命令添加 `HF_ENDPOINT=https://hf-mirror.com`。`--all` 包含所有
+已发布版本，
+可配合 `--current-only` 只导出当前激活版本。也可以传入明确的 `model` 或
+`model@version`；不带 version 的模型名会解析为 `current`。
+`gen` 可作为短别名使用。相同的
+provider、仓库和 revision 只会生成一条下载命令。每次下载后，脚本都会按
+manifest 中记录的名称和版本执行定向的 `mstore import`，因此能保留自定义别名，
+也不会把目标机上其他 ready 缓存导入；当前版本会使用 `--activate`。目标机器
+需保证 `mstore` 在 `PATH` 中。非提交 ID 的 ModelScope revision 会附带警告，
+因为脚本执行前它可能发生变化。目标仓库不是默认路径时可设置
+`MSTORE_STORE=/destination`。各 provider 下载命令都会携带已发布的文件清单，避免把
+部分 snapshot 扩展为完整仓库。如果多个别名指向同一来源但文件清单不同，生成会直接
+报错，避免把一个别名的文件错误发布到另一个别名。`--json` 会输出所选模型和生成脚本
+组成的一个 JSON 值。每个来源使用独立的临时 provider 缓存，脚本退出时会清理。
+原 manifest 含完整哈希的版本会使用 `--hash` 重新导入，保留目标端的完整校验能力。
+对于没有记录文件清单的旧 manifest，脚本会发出警告并下载完整 revision，不会伪装成可精确
+重建的选择性下载。
+
 维护命令：
 
 ```sh
@@ -162,7 +202,7 @@ mstore doctor --provider all --write-test
 顶层命令：
 
 ```text
-scan import sync list(ls) show path activate rename verify
+scan import sync generate list(ls) show path activate rename verify
 copy(cp) remove(rm) gc doctor completion help
 ```
 
@@ -179,8 +219,10 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 主要命令参数：
 
 - `scan`：`--provider`、`--ready-only`、`--new-only`、`--long`
-- `import`：`--name`、`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `import`：`--name`、`--version`、`--activate`、`--hash`、`--jobs`、`--dry-run`
 - `sync`：`--provider`、`--activate`、`--hash`、`--jobs`、`--dry-run`
+- `generate`（别名 `gen`）：模型引用或 `--all`；搭配 `--all` 可使用
+  `--current-only`；`--uv`；`--hf-mirror`
 - `list`：`--versions`、`--source`、`--long`
 - `show`：`--files`、`--hashes`
 - `path`：`--link`
@@ -201,5 +243,5 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 
 ## 功能边界
 
-mstore 不负责下载、转换、合并、量化、推理或评测模型。它不提供 Web UI、
-registry 服务、数据库或远程传输。
+mstore 自身不负责下载、转换、合并、量化、推理或评测模型。它可以生成调用
+provider CLI 的下载脚本，但不提供 Web UI、registry 服务、数据库或远程传输。

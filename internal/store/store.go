@@ -13,6 +13,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/chieworks/mstore/internal/copier"
 	"github.com/chieworks/mstore/internal/fsutil"
@@ -132,6 +133,25 @@ func (s *Store) Import(src source.Model, opts ImportOptions) (ImportResult, erro
 	result.Path = filepath.Join(s.Root, name, version)
 	if existing {
 		result.Skipped = true
+		if opts.Hash {
+			stored, storedBytes, scanErr := fsutil.Scan(result.Path, true)
+			if scanErr != nil {
+				return result, fmt.Errorf("scan existing version: %w", scanErr)
+			}
+			if storedBytes != bytes || !fsutil.SameTree(stored, before, true) {
+				return result, fmt.Errorf("existing version differs from source content; refusing to record hashes")
+			}
+			m, readErr := manifest.Read(result.Path)
+			if readErr != nil {
+				return result, readErr
+			}
+			if !manifestHasCompleteHashes(m) {
+				m.Entries = before
+				if err := manifest.Write(result.Path, m); err != nil {
+					return result, err
+				}
+			}
+		}
 		if opts.Activate {
 			err = s.activateLocked(name, version, true)
 		}
@@ -195,12 +215,24 @@ func (s *Store) Import(src source.Model, opts ImportOptions) (ImportResult, erro
 	return result, nil
 }
 
+func manifestHasCompleteHashes(m manifest.Manifest) bool {
+	if len(m.Entries) != m.Files || len(m.Entries) == 0 {
+		return false
+	}
+	for _, entry := range m.Entries {
+		if entry.SHA256 == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Store) chooseVersion(name string, src source.Model, requested string, files []manifest.File, bytes int64) (string, bool, error) {
 	if src.Revision == "" {
 		return "", false, fmt.Errorf("immutable source revision is required")
 	}
 	if requested != "" {
-		if !strings.HasPrefix(src.Revision, requested) || strings.ContainsAny(requested, `/\`) {
+		if !validVersionPrefix(requested) || !strings.HasPrefix(src.Revision, requested) {
 			return "", false, fmt.Errorf("invalid requested version %q for revision %q", requested, src.Revision)
 		}
 		return s.checkVersionPath(name, requested, src, files, bytes)
@@ -221,6 +253,11 @@ func (s *Store) chooseVersion(name string, src source.Model, requested string, f
 		}
 	}
 	return "", false, fmt.Errorf("full revision collision for %s", src.Revision)
+}
+
+func validVersionPrefix(version string) bool {
+	return version != "" && version != "." && version != ".." && version != "current" &&
+		!strings.ContainsAny(version, `/\\`) && !strings.ContainsFunc(version, unicode.IsControl)
 }
 
 type versionCollisionError struct{ version string }
@@ -307,6 +344,7 @@ func (s *Store) Resolve(ref string) (Version, error) {
 	if err := naming.Validate(name); err != nil {
 		return Version{}, err
 	}
+	current := ver == ""
 	if ver == "" {
 		link, err := os.Readlink(filepath.Join(s.Root, name, "current"))
 		if err != nil {
@@ -326,7 +364,11 @@ func (s *Store) Resolve(ref string) (Version, error) {
 	if err != nil {
 		return Version{}, err
 	}
-	return Version{Name: name, Version: ver, Path: physical, Manifest: m}, nil
+	if !current {
+		link, err := os.Readlink(filepath.Join(s.Root, name, "current"))
+		current = err == nil && filepath.Base(link) == ver
+	}
+	return Version{Name: name, Version: ver, Path: physical, Current: current, Manifest: m}, nil
 }
 
 func (s *Store) Activate(ref string, noVerify bool) error {
