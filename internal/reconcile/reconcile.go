@@ -192,7 +192,23 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 		selected[id] = selection
 	}
 
-	models, scanErrs := scan(opts.Provider)
+	if opts.Configured && len(selected) == 0 {
+		return report, nil
+	}
+	scanProvider := opts.Provider
+	if opts.Configured && scanProvider == "all" {
+		for id := range selected {
+			if scanProvider == "all" {
+				scanProvider = id.provider
+				continue
+			}
+			if scanProvider != id.provider {
+				scanProvider = "all"
+				break
+			}
+		}
+	}
+	models, scanErrs := scan(scanProvider)
 	var firstFailure error
 	for _, scanErr := range scanErrs {
 		var providerErr providers.ScanError
@@ -286,14 +302,14 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 	var imports []candidate
 	for _, candidate := range candidates {
 		modelCandidates[candidate.name] = append(modelCandidates[candidate.name], candidate)
-		if message := conflicted[candidate.key]; message != "" {
+		if message := conflicted[candidateKey(candidate)]; message != "" {
 			report.Results = append(report.Results, Item{
 				Operation: "import", Status: "conflict", Source: candidate.model.Ref(),
 				Name: candidate.name, Error: message,
 			})
 			continue
 		}
-		if candidate.version != "" {
+		if candidate.version != "" && !opts.Hash {
 			report.Results = append(report.Results, Item{
 				Operation: "import", Status: "skipped", Source: candidate.model.Ref(),
 				Name: candidate.name, Version: candidate.version,
@@ -322,7 +338,7 @@ func Run(repo Repository, scan Scanner, opts Options) (Report, error) {
 	if opts.Activate {
 		names := make([]string, 0, len(modelCandidates))
 		for name, candidates := range modelCandidates {
-			if conflicted[candidates[0].key] == "" {
+			if hasNoConflicts(candidates, conflicted) {
 				names = append(names, name)
 			}
 		}
@@ -364,13 +380,29 @@ func selectedNames(names []string, requested map[string]bool) []string {
 	return selected
 }
 
-func preflightConflicts(candidates []candidate, existing map[string]repoKey) map[repoKey]string {
-	conflicted := map[repoKey]string{}
+func candidateKey(candidate candidate) namedIdentity {
+	return namedIdentity{
+		identity: identity{repoKey: candidate.key, revision: candidate.model.Revision},
+		name:     candidate.name,
+	}
+}
+
+func hasNoConflicts(candidates []candidate, conflicted map[namedIdentity]string) bool {
+	for _, candidate := range candidates {
+		if conflicted[candidateKey(candidate)] != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func preflightConflicts(candidates []candidate, existing map[string]repoKey) map[namedIdentity]string {
+	conflicted := map[namedIdentity]string{}
 	keysByName := map[string]map[repoKey]bool{}
 	for _, candidate := range candidates {
 		if owner, ok := existing[candidate.name]; ok {
 			if owner != candidate.key {
-				conflicted[candidate.key] = fmt.Sprintf(
+				conflicted[candidateKey(candidate)] = fmt.Sprintf(
 					"model name %q is already used by %s:%s; import explicitly with --name",
 					candidate.name, owner.provider, owner.repo,
 				)
@@ -386,10 +418,12 @@ func preflightConflicts(candidates []candidate, existing map[string]repoKey) map
 		if len(keys) < 2 {
 			continue
 		}
-		for key := range keys {
-			conflicted[key] = fmt.Sprintf(
-				"multiple new repositories normalize to %q; import each explicitly with --name", name,
-			)
+		for _, candidate := range candidates {
+			if candidate.name == name && keys[candidate.key] {
+				conflicted[candidateKey(candidate)] = fmt.Sprintf(
+					"multiple new repositories normalize to %q; import each explicitly with --name", name,
+				)
+			}
 		}
 	}
 	return conflicted

@@ -343,12 +343,16 @@ func (a *app) config(args []string) error {
 		models, scanErrs := providers.Scan(*provider)
 		for _, scanErr := range scanErrs {
 			fmt.Fprintln(a.err, "mstore config export:", scanErr)
+			if !errors.Is(scanErr, os.ErrNotExist) {
+				return fmt.Errorf("scan provider caches: %w", scanErr)
+			}
 		}
-		if err := modelconfig.Export(path, models, *overwrite); err != nil {
+		exported, err := modelconfig.Export(path, models, *overwrite)
+		if err != nil {
 			return err
 		}
 		if a.global.json {
-			return writeJSON(a.out, map[string]any{"path": path, "models": len(models)})
+			return writeJSON(a.out, map[string]any{"path": path, "models": exported})
 		}
 		if !a.global.quiet {
 			fmt.Fprintln(a.out, "exported", path)

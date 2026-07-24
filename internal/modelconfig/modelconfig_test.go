@@ -40,8 +40,8 @@ func TestExportWritesDisabledReadyModels(t *testing.T) {
 		{Provider: "hf", Repo: "Acme/Ready", Revision: "0123456789abcdef", Status: "ready"},
 		{Provider: "hf", Repo: "Acme/Incomplete", Revision: "abcdef", Status: "incomplete"},
 	}
-	if err := Export(path, models, false); err != nil {
-		t.Fatal(err)
+	if count, err := Export(path, models, false); err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -58,8 +58,23 @@ func TestExportWritesDisabledReadyModels(t *testing.T) {
 	if strings.Contains(got, "Incomplete") || strings.Contains(got, "activate") {
 		t.Fatalf("unexpected export:\n%s", got)
 	}
-	if err := Export(path, models, false); err == nil {
+	if _, err := Export(path, models, false); err == nil {
 		t.Fatal("expected overwrite protection")
+	}
+}
+
+func TestExportUsesFallbackNameWhenDefaultNameIsInvalid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.toml")
+	models := []source.Model{{Provider: "hf", Repo: "Acme/模型", Revision: "0123456789abcdef", Status: "ready"}}
+	if count, err := Export(path, models, false); err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	file, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Models) != 1 || !strings.HasPrefix(file.Models[0].Name, "model-") {
+		t.Fatalf("models=%#v", file.Models)
 	}
 }
 

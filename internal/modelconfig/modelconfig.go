@@ -3,8 +3,10 @@ package modelconfig
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -127,14 +129,8 @@ func Selections(file File) ([]Selection, error) {
 }
 
 // Export writes a deliberately conservative candidate file: no model is enabled.
-func Export(path string, models []source.Model, overwrite bool) error {
-	if !overwrite {
-		if _, err := os.Lstat(path); err == nil {
-			return fmt.Errorf("warning: config %s already exists; refusing to overwrite (use --overwrite)", path)
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-	}
+// It returns the number of ready models written to the file.
+func Export(path string, models []source.Model, overwrite bool) (int, error) {
 	ready := make([]source.Model, 0, len(models))
 	for _, model := range models {
 		if model.Status == "ready" {
@@ -149,9 +145,33 @@ func Export(path string, models []source.Model, overwrite bool) error {
 	for _, model := range ready {
 		name, err := naming.Normalize(model.Repo)
 		if err != nil {
-			return fmt.Errorf("%s: %w", model.Ref(), err)
+			name = fallbackName(model.Ref())
+			fmt.Fprintf(&b, "\n# Default name could not be derived for %s; choose a descriptive name before enabling it.\n", model.Ref())
 		}
 		fmt.Fprintf(&b, "\n[[models]]\nsource = %q\nenabled = false\nname = %q\n", model.Ref(), name)
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	data := []byte(b.String())
+	if overwrite {
+		return len(ready), os.WriteFile(path, data, 0o644)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return 0, fmt.Errorf("warning: config %s already exists; refusing to overwrite (use --overwrite)", path)
+		}
+		return 0, err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return 0, err
+	}
+	if err := f.Close(); err != nil {
+		return 0, err
+	}
+	return len(ready), nil
+}
+
+func fallbackName(ref string) string {
+	sum := sha256.Sum256([]byte(ref))
+	return fmt.Sprintf("model-%x", sum[:6])
 }
