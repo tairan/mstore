@@ -52,7 +52,7 @@ func Scan(root string) ([]source.Model, error) {
 			dir := filepath.Join(root, ns.Name(), repo.Name())
 			m := source.Model{
 				Provider: "ms",
-				Repo:     ns.Name() + "/" + decodeCacheRepoName(repo.Name()),
+				Repo:     decodeCacheRepoName(ns.Name()) + "/" + decodeCacheRepoName(repo.Name()),
 				Path:     dir,
 				Status:   "ready",
 			}

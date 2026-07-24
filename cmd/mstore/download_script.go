@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/chieworks/mstore/internal/fsutil"
+	"github.com/chieworks/mstore/internal/manifest"
 	"github.com/chieworks/mstore/internal/source"
 	"github.com/chieworks/mstore/internal/store"
 )
@@ -32,8 +33,14 @@ type downloadScriptPlan struct {
 	Script string                `json:"script"`
 }
 
+type downloadSourceKey struct {
+	Provider string
+	Repo     string
+	Revision string
+}
+
 type downloadScriptCommand struct {
-	Command   string
+	Commands  []string
 	SyncAfter bool
 }
 
@@ -115,59 +122,75 @@ func sortedVersions(selected map[string]store.Version) []store.Version {
 
 func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (downloadScriptPlan, error) {
 	plan := downloadScriptPlan{}
-	seen := make(map[string]bool, len(versions))
-	modelScopeRevisions := make(map[string]map[string]bool)
-	for _, v := range versions {
-		src := v.Manifest.Source
-		if src.Provider != "ms" {
-			continue
-		}
-		if modelScopeRevisions[src.Repo] == nil {
-			modelScopeRevisions[src.Repo] = make(map[string]bool)
-		}
-		modelScopeRevisions[src.Repo][src.Revision] = true
+	type sourceGroup struct {
+		files map[string]bool
 	}
-	var commands []downloadScriptCommand
-	var warnings []string
-	seenWarnings := make(map[string]bool)
+	groups := make(map[downloadSourceKey]*sourceGroup, len(versions))
+	var orderedKeys []downloadSourceKey
+	modelScopeRevisions := make(map[string]map[string]bool)
 	for _, v := range versions {
 		src := v.Manifest.Source
 		if _, err := source.ParseRef(src.Provider + ":" + src.Repo + "@" + src.Revision); err != nil {
 			return plan, fmt.Errorf("%s@%s: invalid source in manifest: %w", v.Name, v.Version, err)
 		}
-		var files []string
-		var err error
-		if src.Provider == "hf" {
-			files, err = storedFiles(v)
-			if err != nil {
-				return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
-			}
+		key := downloadSourceKey{Provider: src.Provider, Repo: src.Repo, Revision: src.Revision}
+		group := groups[key]
+		if group == nil {
+			group = &sourceGroup{files: make(map[string]bool)}
+			groups[key] = group
+			orderedKeys = append(orderedKeys, key)
 		}
-		command, err := downloadCommand(src.Provider, src.Repo, src.Revision, files, opts)
+		if src.Provider == "ms" {
+			if modelScopeRevisions[src.Repo] == nil {
+				modelScopeRevisions[src.Repo] = make(map[string]bool)
+			}
+			modelScopeRevisions[src.Repo][src.Revision] = true
+			continue
+		}
+		files, err := storedFiles(v)
 		if err != nil {
 			return plan, fmt.Errorf("%s@%s: %w", v.Name, v.Version, err)
 		}
-		plan.Models = append(plan.Models, downloadScriptModel{
-			Name: v.Name, Version: v.Version, Current: v.Current,
-			Provider: src.Provider, Repo: src.Repo, Revision: src.Revision, Command: command,
-		})
-		key := src.Provider + "\x00" + src.Repo + "\x00" + src.Revision
-		if seen[key] {
-			continue
+		for _, file := range files {
+			group.files[file.Path] = true
 		}
-		seen[key] = true
-		commands = append(commands, downloadScriptCommand{
-			Command: command,
-			SyncAfter: src.Provider == "ms" &&
-				len(modelScopeRevisions[src.Repo]) > 1,
-		})
-		if src.Provider == "ms" && !isImmutableModelScopeRevision(src.Revision) {
-			warning := "ModelScope revision " + src.Repo + "@" + src.Revision + " is not an immutable commit ID; it may move before the script runs."
+	}
+	commands := make(map[downloadSourceKey]downloadScriptCommand, len(groups))
+	var warnings []string
+	seenWarnings := make(map[string]bool)
+	for _, key := range orderedKeys {
+		group := groups[key]
+		files := make([]string, 0, len(group.files))
+		for file := range group.files {
+			files = append(files, file)
+		}
+		sort.Strings(files)
+		command, err := downloadCommands(key.Provider, key.Repo, key.Revision, files, opts)
+		if err != nil {
+			return plan, fmt.Errorf("%s@%s: %w", key.Repo, key.Revision, err)
+		}
+		commands[key] = downloadScriptCommand{
+			Commands: command,
+			SyncAfter: key.Provider == "ms" &&
+				len(modelScopeRevisions[key.Repo]) > 1,
+		}
+		if key.Provider == "ms" && !isImmutableModelScopeRevision(key.Revision) {
+			warning := "ModelScope revision " + key.Repo + "@" + key.Revision + " is not an immutable commit ID; it may move before the script runs."
 			if !seenWarnings[warning] {
 				seenWarnings[warning] = true
 				warnings = append(warnings, warning)
 			}
 		}
+	}
+	for _, v := range versions {
+		src := v.Manifest.Source
+		key := downloadSourceKey{Provider: src.Provider, Repo: src.Repo, Revision: src.Revision}
+		command := commands[key]
+		plan.Models = append(plan.Models, downloadScriptModel{
+			Name: v.Name, Version: v.Version, Current: v.Current,
+			Provider: src.Provider, Repo: src.Repo, Revision: src.Revision,
+			Command: strings.Join(command.Commands, "\n"),
+		})
 	}
 	sort.Strings(warnings)
 
@@ -191,36 +214,67 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 	for _, command := range commands {
 		needsStore = needsStore || command.SyncAfter
 	}
+	currentRefs := make([]string, 0)
+	seenCurrent := make(map[string]bool)
+	for _, v := range versions {
+		if !v.Current {
+			continue
+		}
+		ref := v.Name + "@" + v.Version
+		if !seenCurrent[ref] {
+			seenCurrent[ref] = true
+			currentRefs = append(currentRefs, ref)
+		}
+	}
+	needsStore = needsStore || len(currentRefs) > 0
 	if needsStore {
-		b.WriteString("# Set MSTORE_STORE to the destination store when preserving multiple ModelScope revisions.\n")
+		b.WriteString("# Set MSTORE_STORE to the destination store for sync and activation steps.\n")
 		b.WriteString("MSTORE_STORE=\"${MSTORE_STORE:-${MSTORE_HOME:-$HOME/models}}\"\n")
 	}
-	for _, command := range commands {
-		b.WriteString("\n")
-		b.WriteString(command.Command)
-		if command.SyncAfter {
-			b.WriteString("\n# Preserve this ModelScope revision before downloading the next one.\n")
-			b.WriteString("mstore --store \"$MSTORE_STORE\" sync --provider ms")
+	for _, key := range orderedKeys {
+		command := commands[key]
+		for _, text := range command.Commands {
+			b.WriteString("\n")
+			b.WriteString(text)
+			if command.SyncAfter {
+				b.WriteString("\n# Preserve this ModelScope revision before downloading the next one.\n")
+				b.WriteString("mstore --store \"$MSTORE_STORE\" sync --provider ms")
+			}
+			b.WriteString("\n")
 		}
-		b.WriteString("\n")
+	}
+	if len(currentRefs) > 0 {
+		b.WriteString("\nmstore --store \"$MSTORE_STORE\" sync\n")
+		for _, ref := range currentRefs {
+			b.WriteString("mstore --store \"$MSTORE_STORE\" activate ")
+			b.WriteString(shellQuote(ref))
+			b.WriteString(" --no-verify\n")
+		}
 	}
 	plan.Script = b.String()
 	return plan, nil
 }
 
-func storedFiles(v store.Version) ([]string, error) {
-	files, _, err := fsutil.Scan(v.Path, false)
+func storedFiles(v store.Version) ([]manifest.File, error) {
+	fullHash := false
+	for _, file := range v.Manifest.Entries {
+		fullHash = fullHash || file.SHA256 != ""
+	}
+	files, _, err := fsutil.Scan(v.Path, fullHash)
 	if err != nil {
 		return nil, fmt.Errorf("scan stored files: %w", err)
 	}
 	if len(files) != v.Manifest.Files {
 		return nil, fmt.Errorf("stored file inventory changed: manifest has %d files, found %d", v.Manifest.Files, len(files))
 	}
-	paths := make([]string, len(files))
-	for i, file := range files {
-		paths[i] = file.Path
+	if len(v.Manifest.Entries) > 0 {
+		expected := append([]manifest.File(nil), v.Manifest.Entries...)
+		sort.Slice(expected, func(i, j int) bool { return expected[i].Path < expected[j].Path })
+		if !fsutil.SameTree(expected, files, fullHash) {
+			return nil, fmt.Errorf("stored file inventory differs from manifest")
+		}
 	}
-	return paths, nil
+	return files, nil
 }
 
 func isImmutableModelScopeRevision(revision string) bool {
@@ -233,6 +287,49 @@ func isImmutableModelScopeRevision(revision string) bool {
 		}
 	}
 	return true
+}
+
+const maxDownloadCommandLength = 64 * 1024
+
+func downloadCommands(provider, repo, revision string, files []string, opts downloadScriptOptions) ([]string, error) {
+	if provider != "hf" || len(files) == 0 {
+		command, err := downloadCommand(provider, repo, revision, files, opts)
+		if err != nil {
+			return nil, err
+		}
+		return []string{command}, nil
+	}
+	baseLength := len(downloadCommandPrefix(provider, repo, revision, opts))
+	var commands []string
+	var chunk []string
+	chunkLength := baseLength
+	for _, file := range files {
+		fileLength := len(" ") + len(shellQuote(file))
+		if len(chunk) > 0 && chunkLength+fileLength > maxDownloadCommandLength {
+			command, err := downloadCommand(provider, repo, revision, chunk, opts)
+			if err != nil {
+				return nil, err
+			}
+			commands = append(commands, command)
+			chunk = nil
+			chunkLength = baseLength
+		}
+		chunk = append(chunk, file)
+		chunkLength += fileLength
+	}
+	if len(chunk) > 0 {
+		command, err := downloadCommand(provider, repo, revision, chunk, opts)
+		if err != nil {
+			return nil, err
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
+
+func downloadCommandPrefix(provider, repo, revision string, opts downloadScriptOptions) string {
+	command, _ := downloadCommand(provider, repo, revision, nil, opts)
+	return command
 }
 
 func downloadCommand(provider, repo, revision string, files []string, opts downloadScriptOptions) (string, error) {

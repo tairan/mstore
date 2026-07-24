@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -257,6 +258,14 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 			t.Fatalf("generated script missing %q:\n%s", command, got)
 		}
 	}
+	for _, activation := range []string{
+		"mstore --store \"$MSTORE_STORE\" activate 'widget@" + currentRevision[:12] + "' --no-verify",
+		"mstore --store \"$MSTORE_STORE\" activate 'demo@" + msRevision + "' --no-verify",
+	} {
+		if !strings.Contains(got, activation) {
+			t.Fatalf("generated script missing activation %q:\n%s", activation, got)
+		}
+	}
 	if !strings.HasPrefix(got, "#!/usr/bin/env bash\n") || !strings.Contains(got, "set -euo pipefail\n") {
 		t.Fatalf("not a Bash script: %q", got)
 	}
@@ -341,14 +350,19 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	revision := "1111111111111111111111111111111111111111"
-	src := source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}
 	version := ""
-	for _, name := range []string{"widget-a", "widget-b"} {
+	for i, name := range []string{"widget-a", "widget-b"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if i == 1 {
+			if err := os.WriteFile(filepath.Join(dir, "weights.bin"), []byte("weights"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		src := source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: revision, Path: dir, Status: "ready"}
 		result, err := s.Import(src, store.ImportOptions{Name: name})
 		if err != nil {
 			t.Fatal(err)
@@ -370,7 +384,7 @@ func TestCLIGenerateJSONRetainsSelectedAliases(t *testing.T) {
 	if len(plan.Models) != 2 || plan.Models[0].Name != "widget-a" || plan.Models[1].Name != "widget-b" {
 		t.Fatalf("models=%#v", plan.Models)
 	}
-	command := "hf download 'Acme/Widget' 'config.json' --revision '" + revision + "'"
+	command := "hf download 'Acme/Widget' 'config.json' 'weights.bin' --revision '" + revision + "'"
 	if strings.Count(plan.Script, command) != 1 {
 		t.Fatalf("duplicate source command count=%d script=%q", strings.Count(plan.Script, command), plan.Script)
 	}
@@ -412,6 +426,56 @@ func TestCLIGeneratePreservesMultipleModelScopeRevisions(t *testing.T) {
 	if strings.Index(script, first) > strings.Index(script, "mstore --store \"$MSTORE_STORE\" sync --provider ms") ||
 		strings.Index(script, "mstore --store \"$MSTORE_STORE\" sync --provider ms") > strings.Index(script, second) {
 		t.Fatalf("first revision was not synced before the second: %q", script)
+	}
+}
+
+func TestCLIGenerateRejectsChangedManifestInventory(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "weights.bin"), []byte("weights"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.Import(source.Model{
+		Provider: "hf", Repo: "Acme/Widget", Revision: "111111111111aaaa",
+		Path: dir, Status: "ready",
+	}, store.ImportOptions{Name: "widget", Hash: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(result.Path, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(result.Path, "replacement.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "generate", "widget@" + result.Version}, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "stored file inventory differs from manifest") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestDownloadCommandsChunkLargeInventories(t *testing.T) {
+	files := make([]string, 0, 2000)
+	for i := range 2000 {
+		files = append(files, fmt.Sprintf("weights/%04d-%s.bin", i, strings.Repeat("x", 60)))
+	}
+	commands, err := downloadCommands("hf", "Acme/Widget", "111111111111aaaa", files, downloadScriptOptions{})
+	if err != nil || len(commands) < 2 {
+		t.Fatalf("commands=%d err=%v", len(commands), err)
+	}
+	for _, command := range commands {
+		if len(command) > maxDownloadCommandLength {
+			t.Fatalf("command length=%d exceeds limit", len(command))
+		}
 	}
 }
 

@@ -193,6 +193,8 @@ must be available on `PATH`. Set `MSTORE_STORE=/destination` when the target
 store is not the default. Non-commit ModelScope revisions are marked with a
 warning because they may move before the script runs. Hugging Face commands
 include the published file inventory so partial snapshots are not expanded.
+When selected versions include active models, the script performs a final sync
+and restores those active links.
 `--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:

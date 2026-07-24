@@ -11,7 +11,7 @@ import (
 
 func TestScanCurrentLayout(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "models")
-	dir := filepath.Join(root, "Qwen", "Talker-0___6B")
+	dir := filepath.Join(root, "org___name", "Talker-0___6B")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func TestScanCurrentLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Repo != "Qwen/Talker-0.6B" ||
+	if len(models) != 1 || models[0].Repo != "org.name/Talker-0.6B" ||
 		models[0].Path != dir || models[0].Revision != "abc123def456" ||
 		models[0].Status != "ready" || !models[0].Preferred {
 		t.Fatalf("unexpected models: %#v", models)

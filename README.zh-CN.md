@@ -179,6 +179,7 @@ provider、仓库和 revision 只会生成一条下载命令。`--json` 会输�
 ID 的 ModelScope revision 会附带警告，因为脚本执行前它可能发生变化。目标
 仓库不是默认路径时可设置 `MSTORE_STORE=/destination`。Hugging Face 命令会
 携带已发布的文件清单，避免把部分 snapshot 扩展为完整仓库。
+如果所选版本包含当前激活版本，脚本会在最后执行同步并恢复对应的 current 链接。
 
 维护命令：
 
