@@ -37,7 +37,7 @@ jobs:
         run: mise run check
 
       - name: Build Linux amd64
-        run: mise run build-all
+        run: MSTORE_VERSION="${GITHUB_SHA:0:12}" mise run build-all
 
       - name: Validate binary
         shell: bash
