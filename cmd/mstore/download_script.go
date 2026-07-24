@@ -234,6 +234,9 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 			b.WriteString(shellQuote(v.Name))
 			b.WriteString(" --version ")
 			b.WriteString(shellQuote(v.Version))
+			if hasHashes(v.Manifest.Entries) {
+				b.WriteString(" --hash")
+			}
 			if v.Current {
 				b.WriteString(" --activate")
 			}
