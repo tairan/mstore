@@ -28,12 +28,12 @@ go test ./...
 description = "Build mstore for the current platform"
 run = """
 mkdir -p bin
-go build -trimpath -ldflags="-s -w -X main.version=${MSTORE_VERSION:-0.2.0}" -o bin/mstore ./cmd/mstore
+go build -trimpath -ldflags="-s -w -X main.version=${MSTORE_VERSION:-0.3.0}" -o bin/mstore ./cmd/mstore
 """
 
 [tasks.build-all]
 description = "Build the static Linux amd64 binary"
 run = """
 mkdir -p dist
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${MSTORE_VERSION:-0.2.0}" -o dist/mstore-linux-amd64 ./cmd/mstore
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${MSTORE_VERSION:-0.3.0}" -o dist/mstore-linux-amd64 ./cmd/mstore
 """

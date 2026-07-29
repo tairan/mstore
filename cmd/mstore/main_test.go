@@ -66,17 +66,25 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 		t.Fatalf("code=%d stderr=%q", code, errOut.String())
 	}
 	for _, line := range []string{
-		"  generate, gen        Generate a Bash download script from stored manifests.",
+		"  generate, gen        Generate a Bash download script from manifests or config.",
 		"  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).",
 		"  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]",
 		"      Write ./models.toml by default. Existing files are protected unless",
-		"  generate:  --all  --current-only  --uv  --hf-mirror",
+		"  generate:  --config FILE  --all  --current-only  --uv  --hf-mirror",
 		"  mstore generate --all > download-models.sh",
+		"  mstore generate --config models.toml > download-models.sh",
 		"  mstore generate --uv --hf-mirror --all > download-models.sh",
 	} {
 		if !strings.Contains(out.String(), line) {
 			t.Fatalf("help is missing %q:\n%s", line, out.String())
 		}
+	}
+}
+
+func TestCLIVersion(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--version"}, &out, &errOut); code != 0 || out.String() != "mstore 0.3.0\n" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
 
@@ -465,6 +473,98 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + currentRevision + "'"
 	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || !plan.Models[0].Current || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
 		t.Fatalf("unexpected JSON plan: %s", out.String())
+	}
+}
+
+func TestCLIGenerateFromConfig(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "models.toml")
+	hfRevision := "1111111111111111111111111111111111111111"
+	msRevision := "v1.2.3"
+	contents := "schema = 1\n\n[defaults]\nhash = true\n\n" +
+		"[[models]]\nsource = \"hf:Acme/Widget@" + hfRevision + "\"\nenabled = true\nname = \"widget\"\n\n" +
+		"[[models]]\nsource = \"ms:Qwen/Demo@" + msRevision + "\"\nenabled = true\nname = \"demo\"\n\n" +
+		"[[models]]\nsource = \"hf:Acme/Disabled@2222222222222222222222222222222222222222\"\nenabled = false\nname = \"disabled\"\n"
+	if err := os.WriteFile(config, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{"generate", "--config", config}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	script := out.String()
+	for _, want := range []string{
+		"hf download 'Acme/Widget' --revision '" + hfRevision + "'",
+		"modelscope download --model 'Qwen/Demo' --revision '" + msRevision + "'",
+		"mstore --store \"$MSTORE_STORE\" import --name 'widget' --hash 'hf:Acme/Widget@" + hfRevision + "'",
+		"mstore --store \"$MSTORE_STORE\" import --name 'demo' --hash 'ms:Qwen/Demo@" + msRevision + "'",
+		"# WARNING: ModelScope revision Qwen/Demo@v1.2.3 is not an immutable commit ID; it may move before the script runs.",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("generated script missing %q:\n%s", want, script)
+		}
+	}
+	for _, unwanted := range []string{"Disabled", " --activate ", " --version "} {
+		if strings.Contains(script, unwanted) {
+			t.Fatalf("generated script unexpectedly contains %q:\n%s", unwanted, script)
+		}
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"generate", "--uv", "--hf-mirror", "--config", config}, &out, &errOut)
+	if code != 0 ||
+		!strings.Contains(out.String(), "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '"+hfRevision+"'") ||
+		!strings.Contains(out.String(), "uvx modelscope download --model 'Qwen/Demo' --revision '"+msRevision+"'") {
+		t.Fatalf("uv with hf-mirror: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"--json", "generate", "--config", config}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("JSON code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	var plan downloadScriptPlan
+	if err := json.Unmarshal(out.Bytes(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Models) != 2 || plan.Models[0].Name != "widget" || plan.Models[0].Version != "" || plan.Models[0].Current {
+		t.Fatalf("unexpected JSON plan: %s", out.String())
+	}
+
+	emptyConfig := filepath.Join(t.TempDir(), "empty.toml")
+	if err := os.WriteFile(emptyConfig, []byte("schema = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	code = run([]string{"generate", "--config", emptyConfig}, &out, &errOut)
+	if code != 0 || !strings.Contains(out.String(), "set -euo pipefail\n") || strings.Contains(out.String(), "MSTORE_DOWNLOAD_CACHE") {
+		t.Fatalf("empty config: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLIGenerateFromConfigRejectsConflictingSelectors(t *testing.T) {
+	config := filepath.Join(t.TempDir(), "models.toml")
+	if err := os.WriteFile(config, []byte("schema = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"generate", "--config", config, "--all"},
+		{"generate", "--config", config, "widget"},
+		{"generate", "--config", config, "--current-only"},
+	} {
+		var out, errOut bytes.Buffer
+		if code := run(args, &out, &errOut); code != 2 {
+			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, out.String(), errOut.String())
+		}
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"generate", "--config", filepath.Join(t.TempDir(), "missing.toml")}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "read config") {
+		t.Fatalf("missing config: code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
 

@@ -6,7 +6,7 @@
 
 `mstore` 将 Hugging Face 或 ModelScope 原生缓存中已经下载完成的模型发布到
 便携、不可变的本地模型仓库。它自身不会下载模型，也不会写入 provider 缓存，
-但可以根据已发布模型的 manifest 生成 provider 下载脚本。
+但可以根据已发布模型的 manifest 或模型配置生成 provider 下载脚本。
 
 发布后的目录只包含普通文件，因此可以只读挂载到容器、复制到已挂载磁盘、
 进行备份，或在没有数据库的情况下迁移到其他机器。
@@ -190,6 +190,13 @@ mstore generate --all > download-models.sh
 bash download-models.sh
 ```
 
+若目标机器没有本地 mstore 仓库，也可以直接根据启用的配置生成脚本：
+
+```sh
+mstore generate --config models.toml > download-models.sh
+bash download-models.sh
+```
+
 目标机器希望通过 uv 运行 provider CLI 时可使用 `--uv`；与 `--hf-mirror`
 组合可让 Hugging Face 下载走 HF-Mirror：
 
@@ -218,7 +225,9 @@ manifest 中记录的名称和版本执行定向的 `mstore import`，因此能�
 组成的一个 JSON 值。每个来源使用独立的临时 provider 缓存，脚本退出时会清理。
 原 manifest 含完整哈希的版本会使用 `--hash` 重新导入，保留目标端的完整校验能力。
 对于没有记录文件清单的旧 manifest，脚本会发出警告并下载完整 revision，不会伪装成可精确
-重建的选择性下载。
+重建的选择性下载。使用 `--config` 时，脚本会下载每个启用来源的完整指定 revision，并按
+配置中的名称导入，不会激活模型。配置文件没有已发布的文件清单，因此下载量可能大于基于
+manifest 生成的脚本；`defaults.hash = true` 会使这些导入带上 `--hash`。
 
 维护命令：
 

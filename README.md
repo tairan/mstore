@@ -7,7 +7,7 @@
 `mstore` publishes models that are already present in the native Hugging Face
 or ModelScope cache into a portable, immutable local model store. It does not
 download models itself or write to provider caches, but it can generate a
-provider download script from published model manifests.
+provider download script from published model manifests or a model config.
 
 The resulting directories are ordinary files, so they can be mounted
 read-only into containers, copied to mounted disks, backed up, or moved to
@@ -204,6 +204,14 @@ mstore generate --all > download-models.sh
 bash download-models.sh
 ```
 
+To recreate an enabled model configuration on another machine without a local
+mstore store, generate directly from the config:
+
+```sh
+mstore generate --config models.toml > download-models.sh
+bash download-models.sh
+```
+
 Use `--uv` when the destination machine should run the provider CLIs through
 uv, and combine it with `--hf-mirror` to route Hugging Face downloads through
 HF-Mirror:
@@ -238,6 +246,11 @@ script exits. Versions imported with recorded hashes are re-imported with
 `--hash` so full verification remains available on the destination.
 For older manifests without a recorded inventory, the script warns and downloads
 the full revision instead of pretending a selective reconstruction is exact.
+When generated from `--config`, the script downloads each enabled source's full
+configured revision, imports it with the configured name, and does not activate
+it. Config files have no published file inventory, so this can download more
+than a script generated from stored manifests. `defaults.hash = true` adds
+`--hash` to those imports.
 `--json` returns the selected models and generated script as a single JSON value.
 
 Maintenance commands:
