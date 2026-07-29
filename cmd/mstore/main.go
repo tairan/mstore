@@ -21,7 +21,7 @@ import (
 	"github.com/chieworks/mstore/internal/store"
 )
 
-var version = "0.2.0"
+var version = "0.3.0"
 
 type globalOptions struct {
 	store   string
@@ -770,7 +770,7 @@ Commands:
   sync                 Publish ready cached revisions.
   config export        Export an editable model selection file.
   config check         Validate a model selection file.
-  generate, gen        Generate a Bash download script from stored manifests.
+  generate, gen        Generate a Bash download script from manifests or config.
   list, ls             List stored models and versions.
   show                 Show a model manifest.
   path                 Print a model's physical path.
@@ -808,13 +808,14 @@ Source references:
 Selected command options:
   import:    --name NAME  --version VER  --activate  --hash  --jobs N  --dry-run
   sync:      --provider hf|ms|all  --config FILE  --activate  --hash  --jobs N  --dry-run
-  generate:  --all  --current-only  --uv  --hf-mirror
+  generate:  --config FILE  --all  --current-only  --uv  --hf-mirror
 
 Examples:
   mstore sync
   mstore config export
   mstore sync --config models.toml --dry-run
   mstore generate --all > download-models.sh
+  mstore generate --config models.toml > download-models.sh
   mstore generate --uv --hf-mirror --all > download-models.sh
 `)
 }
