@@ -3,6 +3,7 @@ package modelscope
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chieworks/mstore/internal/source"
@@ -49,6 +50,46 @@ func TestScanListsMultipleSnapshotsIndependently(t *testing.T) {
 	if model.Repo != "Qwen/Demo" || model.Revision != "v1.2.3" ||
 		model.Path != filepath.Join(root, "Qwen--Demo", "snapshots", "v1.2.3") {
 		t.Fatalf("unexpected resolved model: %#v", model)
+	}
+}
+
+func TestResolveRejectsAmbiguousSnapshotSelections(t *testing.T) {
+	cache := t.TempDir()
+	root := filepath.Join(cache, "models")
+	for _, revision := range []string{"v1", "v2"} {
+		dir := filepath.Join(root, "Qwen--Demo", "snapshots", revision)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("MODELSCOPE_CACHE", cache)
+
+	for _, ref := range []source.Ref{
+		{Provider: "ms", Repo: "Qwen/Demo"},
+		{Provider: "ms", Repo: "Qwen/Demo", Revision: "v"},
+	} {
+		_, err := Resolve(ref)
+		if err == nil || !strings.Contains(err.Error(), "multiple revisions") && !strings.Contains(err.Error(), "ambiguous") {
+			t.Fatalf("Resolve(%#v) error = %v", ref, err)
+		}
+	}
+}
+
+func TestScanMarksInvalidSnapshotsNotReady(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "models")
+	dir := filepath.Join(root, "BAAI--bge-m3", "snapshots", "master")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	models, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Status != "invalid" || models[0].Error == "" {
+		t.Fatalf("unexpected models: %#v", models)
 	}
 }
 

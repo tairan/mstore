@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chieworks/mstore/internal/fsutil"
 	"github.com/chieworks/mstore/internal/source"
 )
 
@@ -53,6 +54,9 @@ func Scan(root string) ([]source.Model, error) {
 				Status:    "ready",
 				Preferred: snapshot.Name() == "master",
 			}
+			if _, _, scanErr := fsutil.Scan(dir, false); scanErr != nil {
+				m.Status, m.Error = "invalid", scanErr.Error()
+			}
 			out = append(out, m)
 		}
 	}
@@ -69,15 +73,22 @@ func Resolve(r source.Ref) (source.Model, error) {
 	if err != nil {
 		return source.Model{}, err
 	}
+	var matches []source.Model
 	for _, m := range models {
-		if source.Match(m, r) {
-			if m.Status != "ready" {
-				return source.Model{}, fmt.Errorf("%s: %s", m.Status, m.Error)
-			}
-			return m, nil
+		if source.Match(m, r) && m.Status == "ready" {
+			matches = append(matches, m)
 		}
 	}
-	return source.Model{}, fmt.Errorf("source not found: ms:%s", r.Repo)
+	if len(matches) == 0 {
+		return source.Model{}, fmt.Errorf("source not found or incomplete: ms:%s", r.Repo)
+	}
+	if len(matches) > 1 && r.Revision == "" {
+		return source.Model{}, fmt.Errorf("multiple revisions found for ms:%s; specify @revision", r.Repo)
+	}
+	if len(matches) > 1 {
+		return source.Model{}, fmt.Errorf("revision prefix is ambiguous")
+	}
+	return matches[0], nil
 }
 
 func expand(path string) (string, error) {
