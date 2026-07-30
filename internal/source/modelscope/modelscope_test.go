@@ -119,6 +119,24 @@ func TestScanMarksInvalidSnapshotsNotReady(t *testing.T) {
 	}
 }
 
+func TestScanIgnoresSnapshotsWithControlCharacters(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "models")
+	dir := filepath.Join(root, "BAAI--bge-m3", "snapshots", "release\nv1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	models, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
 func TestScanReportsUnreadableSnapshotsDirectory(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "models")
 	if err := os.MkdirAll(filepath.Join(root, "BAAI--bge-m3"), 0o755); err != nil {
