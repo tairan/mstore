@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/chieworks/mstore/internal/fsutil"
 	"github.com/chieworks/mstore/internal/source"
@@ -48,7 +49,7 @@ func Scan(root string) ([]source.Model, error) {
 			continue
 		}
 		for _, snapshot := range snapshots {
-			if !snapshot.IsDir() || snapshot.Name() == "" || strings.HasPrefix(snapshot.Name(), ".") || strings.IndexFunc(snapshot.Name(), unicode.IsControl) >= 0 {
+			if !snapshot.IsDir() || snapshot.Name() == "" || strings.HasPrefix(snapshot.Name(), ".") || !utf8.ValidString(snapshot.Name()) || strings.IndexFunc(snapshot.Name(), unicode.IsControl) >= 0 {
 				continue
 			}
 			dir := filepath.Join(root, repository.Name(), "snapshots", snapshot.Name())

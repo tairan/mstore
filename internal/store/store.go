@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/chieworks/mstore/internal/copier"
 	"github.com/chieworks/mstore/internal/fsutil"
@@ -231,14 +232,17 @@ func (s *Store) chooseVersion(name string, src source.Model, requested string, f
 	if src.Revision == "" {
 		return "", false, fmt.Errorf("immutable source revision is required")
 	}
+	if !utf8.ValidString(src.Revision) {
+		return "", false, fmt.Errorf("source revision is not valid UTF-8")
+	}
 	if requested != "" {
 		if !validVersionPrefix(requested) || !strings.HasPrefix(src.Revision, requested) {
 			return "", false, fmt.Errorf("invalid requested version %q for revision %q", requested, src.Revision)
 		}
 		return s.checkVersionPath(name, requested, src, files, bytes)
 	}
-	start := min(12, len(src.Revision))
-	for n := start; n <= len(src.Revision); n = min(n+4, len(src.Revision)) {
+	start := revisionPrefixLength(src.Revision, 12)
+	for n := start; n <= len(src.Revision); n = revisionPrefixLength(src.Revision, min(n+4, len(src.Revision))) {
 		version := src.Revision[:n]
 		_, existing, err := s.checkVersionPath(name, version, src, files, bytes)
 		if err == nil {
@@ -253,6 +257,16 @@ func (s *Store) chooseVersion(name string, src source.Model, requested string, f
 		}
 	}
 	return "", false, fmt.Errorf("full revision collision for %s", src.Revision)
+}
+
+func revisionPrefixLength(revision string, max int) int {
+	if max >= len(revision) {
+		return len(revision)
+	}
+	for max > 0 && !utf8.RuneStart(revision[max]) {
+		max--
+	}
+	return max
 }
 
 func validVersionPrefix(version string) bool {
