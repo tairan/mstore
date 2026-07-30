@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,6 +68,8 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 	}
 	for _, line := range []string{
 		"  generate, gen        Generate a Bash download script from manifests or config.",
+		"  cache path           Print the mstore download-cache path.",
+		"  cache clean          Remove a marked mstore download cache.",
 		"  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).",
 		"  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]",
 		"      Write ./models.toml by default. Existing files are protected unless",
@@ -433,15 +436,27 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 		t.Fatalf("generated script must not perform an unfiltered sync: %q", got)
 	}
 	for _, line := range []string{
-		"MSTORE_DOWNLOAD_CACHE=\"$(mktemp -d)\"",
-		"MSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/source-0\"",
+		"MSTORE_DOWNLOAD_CACHE=\"${MSTORE_DOWNLOAD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/mstore/downloads}\"",
+		"MSTORE_CACHE_ENTRIES=(\"$MSTORE_DOWNLOAD_CACHE\"/*)",
+		"refusing to mark a populated download cache",
 		"export HF_HUB_CACHE=\"$MSTORE_SOURCE_CACHE/huggingface\"",
 		"export MODELSCOPE_CACHE=\"$MSTORE_SOURCE_CACHE/modelscope\"",
-		"trap 'rm -rf -- \"$MSTORE_DOWNLOAD_CACHE\"' EXIT",
 	} {
 		if !strings.Contains(got, line) {
 			t.Fatalf("generated script missing cache isolation %q: %s", line, got)
 		}
+	}
+	for _, key := range []downloadSourceKey{
+		{Provider: "hf", Repo: "Acme/Widget", Revision: oldRevision},
+		{Provider: "hf", Repo: "Acme/Widget", Revision: currentRevision},
+		{Provider: "ms", Repo: "Qwen/Demo", Revision: msRevision},
+	} {
+		if !strings.Contains(got, "MSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/"+downloadCacheKey(key, nil, true)+"\"") {
+			t.Fatalf("generated script missing stable source cache for %#v: %s", key, got)
+		}
+	}
+	if strings.Contains(got, "mktemp -d") || strings.Contains(got, "trap 'rm -rf") || strings.Contains(got, "source-0") {
+		t.Fatalf("generated script must use persistent stable caches: %s", got)
 	}
 
 	out.Reset()
@@ -515,6 +530,73 @@ func TestCLIGenerateUsesRecordedSources(t *testing.T) {
 	wantCommand := "HF_ENDPOINT='https://hf-mirror.com' uvx --from huggingface_hub hf download 'Acme/Widget' --revision '" + currentRevision + "'"
 	if len(plan.Models) != 1 || plan.Models[0].Revision != currentRevision || !plan.Models[0].Current || plan.Models[0].Command != wantCommand || !strings.Contains(plan.Script, wantCommand) {
 		t.Fatalf("unexpected JSON plan: %s", out.String())
+	}
+}
+
+func TestCLIDownloadCachePathAndClean(t *testing.T) {
+	cacheHome := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheHome)
+	storeRoot := t.TempDir()
+	root := filepath.Join(cacheHome, "mstore", "downloads")
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", storeRoot, "cache", "path"}, &out, &errOut); code != 0 || strings.TrimSpace(out.String()) != root {
+		t.Fatalf("path code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "clean"}, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "requires --yes") {
+		t.Fatalf("missing yes code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "clean", "--yes"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "unmarked") {
+		t.Fatalf("unmarked code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if err := os.WriteFile(filepath.Join(root, downloadCacheMarker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "clean", "--path", cacheHome, "--yes"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "unsafe") {
+		t.Fatalf("unsafe code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "clean", "--path", "", "--yes"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "must not be empty") {
+		t.Fatalf("empty code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "clean", "--yes"}, &out, &errOut); code != 0 {
+		t.Fatalf("clean code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("cache root still exists: %v", err)
+	}
+	override := filepath.Join(t.TempDir(), "downloads")
+	t.Setenv("MSTORE_DOWNLOAD_CACHE", override)
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "path"}, &out, &errOut); code != 0 || strings.TrimSpace(out.String()) != override {
+		t.Fatalf("override path code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if err := os.MkdirAll(override, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(override, downloadCacheMarker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "cache", "clean", "--yes"}, &out, &errOut); code != 0 {
+		t.Fatalf("override clean code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(override); !os.IsNotExist(err) {
+		t.Fatalf("override cache still exists: %v", err)
 	}
 }
 
@@ -931,5 +1013,88 @@ func TestDownloadScriptQuotesShellArguments(t *testing.T) {
 	command, err = downloadCommand("hf", "Acme/Widget", "rev", []string{"-not-an-option"}, downloadScriptOptions{})
 	if err != nil || !strings.Contains(command, " -- '-not-an-option'") {
 		t.Fatalf("file option delimiter missing: %q err=%v", command, err)
+	}
+}
+
+func TestDownloadCacheKeyIsStableAndSourceScoped(t *testing.T) {
+	key := downloadSourceKey{Provider: "hf", Repo: "Acme/Widget", Revision: "v1"}
+	if first, second := downloadCacheKey(key, []string{"config.json"}, false), downloadCacheKey(key, []string{"config.json"}, false); first != second {
+		t.Fatalf("key is not stable: %q != %q", first, second)
+	}
+	keys := map[string]bool{downloadCacheKey(key, []string{"config.json"}, false): true}
+	for _, distinct := range []downloadSourceKey{
+		{Provider: "ms", Repo: "Acme/Widget", Revision: "v1"},
+		{Provider: "hf", Repo: "Acme/Other", Revision: "v1"},
+		{Provider: "hf", Repo: "Acme/Widget", Revision: "v2"},
+	} {
+		if keys[downloadCacheKey(distinct, []string{"config.json"}, false)] {
+			t.Fatalf("distinct source shares cache key: %#v", distinct)
+		}
+		keys[downloadCacheKey(distinct, []string{"config.json"}, false)] = true
+	}
+	if keys[downloadCacheKey(key, []string{"other.json"}, false)] || keys[downloadCacheKey(key, nil, true)] {
+		t.Fatal("distinct inventories share a cache key")
+	}
+}
+
+func TestPersistentDownloadScriptHasValidBashSyntax(t *testing.T) {
+	key := downloadSourceKey{Provider: "hf", Repo: "Acme/Widget", Revision: "v1"}
+	script := renderDownloadScript([]downloadSourceKey{key}, map[downloadSourceKey]downloadScriptCommand{
+		key: {Commands: []string{"hf download 'Acme/Widget' --revision 'v1'"}, CacheKey: downloadCacheKey(key, nil, true)},
+	}, nil, downloadScriptOptions{})
+	path := filepath.Join(t.TempDir(), "download-models.sh")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("bash", "-n", path).CombinedOutput(); err != nil {
+		t.Fatalf("bash syntax: %v\n%s", err, output)
+	}
+}
+
+func TestGeneratedScriptRefusesPopulatedUnmarkedDownloadCache(t *testing.T) {
+	key := downloadSourceKey{Provider: "hf", Repo: "Acme/Widget", Revision: "v1"}
+	script := renderDownloadScript([]downloadSourceKey{key}, map[downloadSourceKey]downloadScriptCommand{
+		key: {CacheKey: downloadCacheKey(key, nil, true)},
+	}, nil, downloadScriptOptions{})
+	path := filepath.Join(t.TempDir(), "download-models.sh")
+	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cacheRoot := filepath.Join(t.TempDir(), "downloads")
+	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheRoot, "unrelated"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("bash", path)
+	command.Env = append(os.Environ(), "MSTORE_DOWNLOAD_CACHE="+cacheRoot)
+	if output, err := command.CombinedOutput(); err == nil || !strings.Contains(string(output), "refusing to mark a populated") {
+		t.Fatalf("unmarked populated cache err=%v output=%q", err, output)
+	}
+	if err := os.Remove(filepath.Join(cacheRoot, "unrelated")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheRoot, downloadCacheMarker), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command = exec.Command("bash", path)
+	command.Env = append(os.Environ(), "MSTORE_DOWNLOAD_CACHE="+cacheRoot)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("marked cache err=%v output=%q", err, output)
+	}
+	home := t.TempDir()
+	workingDir := t.TempDir()
+	command = exec.Command("bash", path)
+	command.Dir = workingDir
+	command.Env = append(os.Environ(), "HOME="+home, "MSTORE_DOWNLOAD_CACHE=~/downloads")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("tilde cache err=%v output=%q", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(home, "downloads", downloadCacheMarker)); err != nil {
+		t.Fatalf("expanded cache marker: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workingDir, "~")); !os.IsNotExist(err) {
+		t.Fatalf("script created a relative tilde directory: %v", err)
 	}
 }

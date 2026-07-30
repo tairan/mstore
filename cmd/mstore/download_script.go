@@ -1,9 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/chieworks/mstore/internal/fsutil"
@@ -44,6 +44,7 @@ type downloadSourceKey struct {
 type downloadScriptCommand struct {
 	Commands []string
 	Models   []downloadScriptImport
+	CacheKey string
 }
 
 type downloadScriptImport struct {
@@ -229,6 +230,7 @@ func makeDownloadScript(versions []store.Version, opts downloadScriptOptions) (d
 		commands[key] = downloadScriptCommand{
 			Commands: command,
 			Models:   storedImports(group.models),
+			CacheKey: downloadCacheKey(key, files, !group.selective),
 		}
 		if !group.selective {
 			fullSnapshots[key] = true
@@ -278,6 +280,7 @@ func makeConfigDownloadScript(selections []modelconfig.Selection, hash bool, opt
 		commands[key] = downloadScriptCommand{
 			Commands: command,
 			Models:   []downloadScriptImport{{Name: selection.Name, Hash: hash, Source: key}},
+			CacheKey: downloadCacheKey(key, nil, true),
 		}
 		orderedKeys = append(orderedKeys, key)
 		plan.Models = append(plan.Models, downloadScriptModel{
@@ -324,14 +327,40 @@ func renderDownloadScript(orderedKeys []downloadSourceKey, commands map[download
 	if len(orderedKeys) > 0 {
 		b.WriteString("# Set MSTORE_STORE to the destination store for imports.\n")
 		b.WriteString("MSTORE_STORE=\"${MSTORE_STORE:-${MSTORE_HOME:-$HOME/models}}\"\n")
-		b.WriteString("# Use isolated provider caches so pre-existing snapshots cannot contaminate imports.\n")
-		b.WriteString("MSTORE_DOWNLOAD_CACHE=\"$(mktemp -d)\"\n")
-		b.WriteString("trap 'rm -rf -- \"$MSTORE_DOWNLOAD_CACHE\"' EXIT\n")
+		b.WriteString("# Reuse isolated, mstore-owned provider caches for exact source revisions.\n")
+		b.WriteString("MSTORE_DOWNLOAD_CACHE=\"${MSTORE_DOWNLOAD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/mstore/downloads}\"\n")
+		b.WriteString("case \"$MSTORE_DOWNLOAD_CACHE\" in\n")
+		b.WriteString("  '~') MSTORE_DOWNLOAD_CACHE=\"$HOME\" ;;\n")
+		b.WriteString("  '~/'*) MSTORE_DOWNLOAD_CACHE=\"$HOME/${MSTORE_DOWNLOAD_CACHE:2}\" ;;\n")
+		b.WriteString("esac\n")
+		b.WriteString("if [[ -e \"$MSTORE_DOWNLOAD_CACHE\" || -L \"$MSTORE_DOWNLOAD_CACHE\" ]]; then\n")
+		b.WriteString("  if [[ -L \"$MSTORE_DOWNLOAD_CACHE\" || ! -d \"$MSTORE_DOWNLOAD_CACHE\" ]]; then\n")
+		b.WriteString("    echo \"mstore: download cache must be a directory, not a symlink\" >&2\n")
+		b.WriteString("    exit 1\n")
+		b.WriteString("  fi\n")
+		b.WriteString("else\n")
+		b.WriteString("  mkdir -p \"$MSTORE_DOWNLOAD_CACHE\"\n")
+		b.WriteString("fi\n")
+		b.WriteString("if [[ -e \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" || -L \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" ]]; then\n")
+		b.WriteString("  if [[ -L \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" || ! -f \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" ]]; then\n")
+		b.WriteString("    echo \"mstore: download cache marker is not a regular file\" >&2\n")
+		b.WriteString("    exit 1\n")
+		b.WriteString("  fi\n")
+		b.WriteString("else\n")
+		b.WriteString("  shopt -s nullglob dotglob\n")
+		b.WriteString("  MSTORE_CACHE_ENTRIES=(\"$MSTORE_DOWNLOAD_CACHE\"/*)\n")
+		b.WriteString("  shopt -u nullglob dotglob\n")
+		b.WriteString("  if (( ${#MSTORE_CACHE_ENTRIES[@]} != 0 )); then\n")
+		b.WriteString("    echo \"mstore: refusing to mark a populated download cache\" >&2\n")
+		b.WriteString("    exit 1\n")
+		b.WriteString("  fi\n")
+		b.WriteString("  : > \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\"\n")
+		b.WriteString("fi\n")
 	}
-	for index, key := range orderedKeys {
+	for _, key := range orderedKeys {
 		command := commands[key]
-		b.WriteString("\nMSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/source-")
-		b.WriteString(strconv.Itoa(index))
+		b.WriteString("\nMSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/")
+		b.WriteString(command.CacheKey)
 		b.WriteString("\"\n")
 		b.WriteString("export HF_HUB_CACHE=\"$MSTORE_SOURCE_CACHE/huggingface\"\n")
 		b.WriteString("export MODELSCOPE_CACHE=\"$MSTORE_SOURCE_CACHE/modelscope\"\n")
@@ -359,6 +388,17 @@ func renderDownloadScript(orderedKeys []downloadSourceKey, commands map[download
 		}
 	}
 	return b.String()
+}
+
+func downloadCacheKey(key downloadSourceKey, files []string, fullSnapshot bool) string {
+	identity := key.Provider + "\x00" + key.Repo + "\x00" + key.Revision + "\x00"
+	if fullSnapshot {
+		identity += "full"
+	} else {
+		identity += "files\x00" + strings.Join(files, "\x00")
+	}
+	sum := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("source-%x", sum[:16])
 }
 
 func storedFiles(v store.Version) ([]manifest.File, error) {
