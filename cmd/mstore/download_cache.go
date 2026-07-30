@@ -12,6 +12,9 @@ import (
 const downloadCacheMarker = ".mstore-download-cache"
 
 func downloadCacheRoot() (string, error) {
+	if path := os.Getenv("MSTORE_DOWNLOAD_CACHE"); path != "" {
+		return expandDownloadCachePath(path)
+	}
 	cacheHome, err := xdgCacheHome()
 	if err != nil {
 		return "", err

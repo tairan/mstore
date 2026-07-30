@@ -224,8 +224,8 @@ manifest 中记录的名称和版本执行定向的 `mstore import`，因此能�
 报错，避免把一个别名的文件错误发布到另一个别名。`--json` 会输出所选模型和生成脚本
 组成的一个 JSON 值。每个来源使用独立的持久化 provider 缓存，默认根目录为
 `${MSTORE_DOWNLOAD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/mstore/downloads}`。
-目录由精确的 provider、仓库和 revision 派生，因此重复执行脚本只会复用相同来源的
-缓存；可设置 `MSTORE_DOWNLOAD_CACHE` 使用其他 mstore 自有根目录。原 manifest
+目录由精确的 provider、仓库、revision 和所选文件清单派生，因此重复执行脚本只会复用
+相同来源的缓存；可设置 `MSTORE_DOWNLOAD_CACHE` 使用其他 mstore 自有根目录。原 manifest
 含完整哈希的版本会使用 `--hash` 重新导入，保留目标端的完整校验能力。
 对于没有记录文件清单的旧 manifest，脚本会发出警告并下载完整 revision，不会伪装成可精确
 重建的选择性下载。使用 `--config` 时，脚本会下载每个启用来源的完整指定 revision，并按

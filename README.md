@@ -243,8 +243,9 @@ share a source but have different inventories, generation stops rather than
 silently publishing one alias with another alias's files.
 Each source uses an isolated persistent provider cache under
 `${MSTORE_DOWNLOAD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/mstore/downloads}`.
-Directories are keyed by the exact provider, repository, and revision, so a
-repeated script can resume or reuse only the matching source cache. Set
+Directories are keyed by the exact provider, repository, revision, and selected
+file inventory, so a repeated script can resume or reuse only the matching
+source cache. Set
 `MSTORE_DOWNLOAD_CACHE` to use another mstore-owned root. Versions imported
 with recorded hashes are re-imported with `--hash` so full verification remains
 available on the destination.
