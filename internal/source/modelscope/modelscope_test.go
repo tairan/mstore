@@ -78,6 +78,32 @@ func TestResolveRejectsAmbiguousSnapshotSelections(t *testing.T) {
 	}
 }
 
+func TestResolvePrefersExactSnapshotRevision(t *testing.T) {
+	cache := t.TempDir()
+	root := filepath.Join(cache, "models")
+	for _, revision := range []string{"v1", "v10"} {
+		dir := filepath.Join(root, "Qwen--Demo", "snapshots", revision)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("MODELSCOPE_CACHE", cache)
+
+	model, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1"})
+	if err != nil || model.Revision != "v1" {
+		t.Fatalf("Resolve exact revision = %#v, %v", model, err)
+	}
+	if err := os.Remove(filepath.Join(root, "Qwen--Demo", "snapshots", "v1", "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1"}); err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("Resolve invalid exact revision error = %v", err)
+	}
+}
+
 func TestScanMarksInvalidSnapshotsNotReady(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "models")
 	dir := filepath.Join(root, "BAAI--bge-m3", "snapshots", "master")
@@ -89,6 +115,20 @@ func TestScanMarksInvalidSnapshotsNotReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(models) != 1 || models[0].Status != "invalid" || models[0].Error == "" {
+		t.Fatalf("unexpected models: %#v", models)
+	}
+}
+
+func TestScanReportsUnreadableSnapshotsDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "models")
+	if err := os.MkdirAll(filepath.Join(root, "BAAI--bge-m3"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	models, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Status != "incomplete" || !strings.Contains(models[0].Error, "read snapshots") {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 }

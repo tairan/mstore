@@ -37,8 +37,13 @@ func Scan(root string) ([]source.Model, error) {
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 			continue
 		}
+		repo := parts[0] + "/" + parts[1]
 		snapshots, err := os.ReadDir(filepath.Join(root, repository.Name(), "snapshots"))
 		if err != nil {
+			out = append(out, source.Model{
+				Provider: "ms", Repo: repo, Status: "incomplete",
+				Error: fmt.Sprintf("read snapshots: %v", err),
+			})
 			continue
 		}
 		for _, snapshot := range snapshots {
@@ -48,7 +53,7 @@ func Scan(root string) ([]source.Model, error) {
 			dir := filepath.Join(root, repository.Name(), "snapshots", snapshot.Name())
 			m := source.Model{
 				Provider:  "ms",
-				Repo:      parts[0] + "/" + parts[1],
+				Repo:      repo,
 				Revision:  snapshot.Name(),
 				Path:      dir,
 				Status:    "ready",
@@ -75,6 +80,15 @@ func Resolve(r source.Ref) (source.Model, error) {
 	}
 	var matches []source.Model
 	for _, m := range models {
+		if m.Provider != r.Provider || m.Repo != r.Repo {
+			continue
+		}
+		if r.Revision != "" && m.Revision == r.Revision {
+			if m.Status != "ready" {
+				return source.Model{}, fmt.Errorf("%s: %s", m.Status, m.Error)
+			}
+			return m, nil
+		}
 		if source.Match(m, r) && m.Status == "ready" {
 			matches = append(matches, m)
 		}
