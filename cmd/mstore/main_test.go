@@ -1041,4 +1041,18 @@ func TestGeneratedScriptRefusesPopulatedUnmarkedDownloadCache(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("marked cache err=%v output=%q", err, output)
 	}
+	home := t.TempDir()
+	workingDir := t.TempDir()
+	command = exec.Command("bash", path)
+	command.Dir = workingDir
+	command.Env = append(os.Environ(), "HOME="+home, "MSTORE_DOWNLOAD_CACHE=~/downloads")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("tilde cache err=%v output=%q", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(home, "downloads", downloadCacheMarker)); err != nil {
+		t.Fatalf("expanded cache marker: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workingDir, "~")); !os.IsNotExist(err) {
+		t.Fatalf("script created a relative tilde directory: %v", err)
+	}
 }
