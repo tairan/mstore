@@ -67,15 +67,13 @@ rejected.
 ModelScope cache lookup is:
 
 1. `$MODELSCOPE_CACHE/models`
-2. `~/.cache/modelscope/hub/models`
+2. `~/.cache/modelscope/models`
 
-Only `models/<namespace>/<repo>` is accepted. Each model must have a valid
-`.mv`; both a plain revision and ModelScope's
-`Revision:<revision>,CreatedAt:<time>` representation are understood.
-Historical `hub/<namespace>/<repo>` layouts are deliberately rejected as
-unsupported rather than probed or guessed.
-ModelScope encodes dots in cache directory names as `___`; mstore restores
-them in displayed source IDs, manifests, and generated download commands.
+This is a breaking change: only the current ModelScope CLI cache layout,
+`models/<namespace>--<repo>/snapshots/<revision>/`, is supported. Each
+snapshot is independently listed and importable. Legacy `.mv` caches at
+`models/<namespace>/<repo>` are not scanned and must be downloaded again with
+the current CLI.
 
 ## Store layout
 
@@ -124,7 +122,7 @@ the others. Name conflicts fail without choosing an arbitrary owner.
 
 `sync` does not change `current` unless `--activate` is supplied. With
 activation enabled, Hugging Face prefers `refs/main` then `refs/master`, and
-ModelScope prefers `.mv`; a repository with exactly one ready revision uses
+ModelScope prefers the `master` snapshot; a repository with exactly one ready revision uses
 that revision as a fallback.
 
 ### Controlled sync with a model config

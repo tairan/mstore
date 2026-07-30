@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/chieworks/mstore/internal/manifest"
 	"github.com/chieworks/mstore/internal/source"
@@ -63,6 +64,21 @@ func TestImportIsIdempotentAndDereferences(t *testing.T) {
 	}
 	if _, err := s.Verify("fancy-model", true, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestImportUsesUTF8SafeVersionPrefix(t *testing.T) {
+	s, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := fixtureSource(t, "Acme/Unicode", "abcdefghij版本")
+	result, err := s.Import(src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(result.Version) || result.Version != "abcdefghij" {
+		t.Fatalf("version = %q", result.Version)
 	}
 }
 
