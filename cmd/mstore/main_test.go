@@ -258,11 +258,8 @@ func TestCLISyncConfigWithNoEnabledModelsDoesNotFallBackToFullSync(t *testing.T)
 
 func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 	cache := t.TempDir()
-	dir := filepath.Join(cache, "models", "Qwen", "Demo-0___6B")
+	dir := filepath.Join(cache, "models", "Qwen--Demo-0.6B", "snapshots", "master")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, ".mv"), []byte("master"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
@@ -283,7 +280,7 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	versions, err := s.List("")
-	if err != nil || len(versions) != 1 || versions[0].Manifest.Source.Repo != "Qwen/Demo-0.6B" {
+	if err != nil || len(versions) != 1 || versions[0].Manifest.Source.Repo != "Qwen/Demo-0.6B" || versions[0].Manifest.Source.Revision != "master" {
 		t.Fatalf("synced versions: %#v, %v", versions, err)
 	}
 
@@ -293,6 +290,51 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master'"
 	if code != 0 || !strings.Contains(out.String(), want) {
 		t.Fatalf("generate code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLIImportAndSyncConfigUseCurrentModelScopeLayout(t *testing.T) {
+	cache := t.TempDir()
+	for _, revision := range []string{"master", "v1"} {
+		dir := filepath.Join(cache, "models", "BAAI--bge-m3", "snapshots", revision)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(revision), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", cache)
+
+	storeRoot := filepath.Join(t.TempDir(), "store")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"scan", "--provider", "ms"}, &out, &errOut); code != 0 ||
+		!strings.Contains(out.String(), "ms:BAAI/bge-m3@master") ||
+		!strings.Contains(out.String(), "ms:BAAI/bge-m3@v1") {
+		t.Fatalf("scan code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "import", "ms:BAAI/bge-m3@master"}, &out, &errOut); code != 0 {
+		t.Fatalf("import code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	config := filepath.Join(t.TempDir(), "models.toml")
+	if err := os.WriteFile(config, []byte("schema = 1\n\n[[models]]\nsource = \"ms:BAAI/bge-m3@v1\"\nenabled = true\nname = \"bge-m3-v1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"--store", storeRoot, "sync", "--config", config}, &out, &errOut); code != 0 {
+		t.Fatalf("sync code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions, err := s.List("")
+	if err != nil || len(versions) != 2 {
+		t.Fatalf("versions=%#v err=%v", versions, err)
 	}
 }
 
