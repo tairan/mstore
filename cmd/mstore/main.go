@@ -116,6 +116,8 @@ func (a *app) dispatch(command string, args []string) error {
 		return a.sync(args)
 	case "config":
 		return a.config(args)
+	case "cache":
+		return a.cache(args)
 	case "generate", "gen":
 		return a.downloadScript(args)
 	case "list", "ls":
@@ -734,13 +736,13 @@ func (a *app) completion(args []string) error {
 	var script string
 	switch shell {
 	case "bash":
-		script = `complete -W "scan import sync generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help" mstore`
+		script = `complete -W "scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help" mstore`
 	case "zsh":
-		script = `compdef '_arguments "1:command:(scan import sync generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help)"' mstore`
+		script = `compdef '_arguments "1:command:(scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help)"' mstore`
 	case "fish":
-		script = `complete -c mstore -f -a "scan import sync generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help"`
+		script = `complete -c mstore -f -a "scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help"`
 	case "powershell":
-		script = `Register-ArgumentCompleter -CommandName mstore -ScriptBlock { param($w,$a,$p) "scan","import","sync","generate","gen","list","show","path","activate","rename","verify","copy","remove","gc","doctor","completion","help" | Where-Object { $_ -like "$w*" } }`
+		script = `Register-ArgumentCompleter -CommandName mstore -ScriptBlock { param($w,$a,$p) "scan","import","sync","config","cache","generate","gen","list","show","path","activate","rename","verify","copy","remove","gc","doctor","completion","help" | Where-Object { $_ -like "$w*" } }`
 	default:
 		return usageError("unsupported shell %q", shell)
 	}
@@ -770,6 +772,8 @@ Commands:
   sync                 Publish ready cached revisions.
   config export        Export an editable model selection file.
   config check         Validate a model selection file.
+  cache path           Print the mstore download-cache path.
+  cache clean          Remove a marked mstore download cache.
   generate, gen        Generate a Bash download script from manifests or config.
   list, ls             List stored models and versions.
   show                 Show a model manifest.
@@ -809,6 +813,7 @@ Selected command options:
   import:    --name NAME  --version VER  --activate  --hash  --jobs N  --dry-run
   sync:      --provider hf|ms|all  --config FILE  --activate  --hash  --jobs N  --dry-run
   generate:  --config FILE  --all  --current-only  --uv  --hf-mirror
+  cache:     path  clean [--path PATH] --yes
 
 Examples:
   mstore sync

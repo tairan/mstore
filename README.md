@@ -241,9 +241,13 @@ because they may move before the script runs. Provider download commands include
 the published file inventory so partial snapshots are not expanded. If aliases
 share a source but have different inventories, generation stops rather than
 silently publishing one alias with another alias's files.
-Each source uses a temporary isolated provider cache, which is removed when the
-script exits. Versions imported with recorded hashes are re-imported with
-`--hash` so full verification remains available on the destination.
+Each source uses an isolated persistent provider cache under
+`${MSTORE_DOWNLOAD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/mstore/downloads}`.
+Directories are keyed by the exact provider, repository, and revision, so a
+repeated script can resume or reuse only the matching source cache. Set
+`MSTORE_DOWNLOAD_CACHE` to use another mstore-owned root. Versions imported
+with recorded hashes are re-imported with `--hash` so full verification remains
+available on the destination.
 For older manifests without a recorded inventory, the script warns and downloads
 the full revision instead of pretending a selective reconstruction is exact.
 When generated from `--config`, the script downloads each enabled source's full
@@ -261,18 +265,23 @@ mstore remove model@version --yes
 mstore remove model --inactive --yes
 mstore gc --older-than 24h --dry-run
 mstore doctor --provider all --write-test
+mstore cache path
+mstore cache clean --yes
+mstore cache clean --path /srv/mstore-downloads --yes
 ```
 
 `remove` protects the active version unless `--force` is explicit. `gc` only
 cleans staging data, `.part` files, and stale locks; it never deletes published
-models or provider caches.
+models or provider caches. `cache clean` is opt-in and removes only a cache root
+carrying mstore's ownership marker; it rejects unsafe locations and never
+deletes Hugging Face or ModelScope provider-wide caches.
 
 ## CLI reference
 
 Top-level commands:
 
 ```text
-scan import sync config generate list(ls) show path activate rename verify
+scan import sync config cache generate list(ls) show path activate rename verify
 copy(cp) remove(rm) gc doctor completion help
 ```
 
@@ -293,6 +302,7 @@ Important command options:
 - `sync`: `--provider`, `--config`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `config export`: `--output`, `--provider`, `--overwrite`
 - `config check`: `FILE`
+- `cache clean`: `--path PATH`, `--yes`
 - `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`;
   `--uv`; `--hf-mirror`
 - `list`: `--versions`, `--source`, `--long`

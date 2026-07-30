@@ -1,9 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/chieworks/mstore/internal/fsutil"
@@ -324,14 +324,19 @@ func renderDownloadScript(orderedKeys []downloadSourceKey, commands map[download
 	if len(orderedKeys) > 0 {
 		b.WriteString("# Set MSTORE_STORE to the destination store for imports.\n")
 		b.WriteString("MSTORE_STORE=\"${MSTORE_STORE:-${MSTORE_HOME:-$HOME/models}}\"\n")
-		b.WriteString("# Use isolated provider caches so pre-existing snapshots cannot contaminate imports.\n")
-		b.WriteString("MSTORE_DOWNLOAD_CACHE=\"$(mktemp -d)\"\n")
-		b.WriteString("trap 'rm -rf -- \"$MSTORE_DOWNLOAD_CACHE\"' EXIT\n")
+		b.WriteString("# Reuse isolated, mstore-owned provider caches for exact source revisions.\n")
+		b.WriteString("MSTORE_DOWNLOAD_CACHE=\"${MSTORE_DOWNLOAD_CACHE:-${XDG_CACHE_HOME:-$HOME/.cache}/mstore/downloads}\"\n")
+		b.WriteString("mkdir -p \"$MSTORE_DOWNLOAD_CACHE\"\n")
+		b.WriteString("if [[ -L \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" || ( -e \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" && ! -f \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\" ) ]]; then\n")
+		b.WriteString("  echo \"mstore: download cache marker is not a regular file\" >&2\n")
+		b.WriteString("  exit 1\n")
+		b.WriteString("fi\n")
+		b.WriteString(": > \"$MSTORE_DOWNLOAD_CACHE/.mstore-download-cache\"\n")
 	}
-	for index, key := range orderedKeys {
+	for _, key := range orderedKeys {
 		command := commands[key]
-		b.WriteString("\nMSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/source-")
-		b.WriteString(strconv.Itoa(index))
+		b.WriteString("\nMSTORE_SOURCE_CACHE=\"$MSTORE_DOWNLOAD_CACHE/")
+		b.WriteString(downloadCacheKey(key))
 		b.WriteString("\"\n")
 		b.WriteString("export HF_HUB_CACHE=\"$MSTORE_SOURCE_CACHE/huggingface\"\n")
 		b.WriteString("export MODELSCOPE_CACHE=\"$MSTORE_SOURCE_CACHE/modelscope\"\n")
@@ -359,6 +364,11 @@ func renderDownloadScript(orderedKeys []downloadSourceKey, commands map[download
 		}
 	}
 	return b.String()
+}
+
+func downloadCacheKey(key downloadSourceKey) string {
+	sum := sha256.Sum256([]byte(key.Provider + "\x00" + key.Repo + "\x00" + key.Revision))
+	return fmt.Sprintf("source-%x", sum[:16])
 }
 
 func storedFiles(v store.Version) ([]manifest.File, error) {
