@@ -138,6 +138,8 @@ func (a *app) dispatch(command string, args []string) error {
 		return a.remove(args)
 	case "gc":
 		return a.gc(args)
+	case "prune":
+		return a.prune(args)
 	case "doctor":
 		return a.doctor(args)
 	case "completion":
@@ -736,13 +738,13 @@ func (a *app) completion(args []string) error {
 	var script string
 	switch shell {
 	case "bash":
-		script = `complete -W "scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help" mstore`
+		script = `complete -W "scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc prune doctor completion help" mstore`
 	case "zsh":
-		script = `compdef '_arguments "1:command:(scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help)"' mstore`
+		script = `compdef '_arguments "1:command:(scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc prune doctor completion help)"' mstore`
 	case "fish":
-		script = `complete -c mstore -f -a "scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc doctor completion help"`
+		script = `complete -c mstore -f -a "scan import sync config cache generate gen list ls show path activate rename verify copy cp remove rm gc prune doctor completion help"`
 	case "powershell":
-		script = `Register-ArgumentCompleter -CommandName mstore -ScriptBlock { param($w,$a,$p) "scan","import","sync","config","cache","generate","gen","list","show","path","activate","rename","verify","copy","remove","gc","doctor","completion","help" | Where-Object { $_ -like "$w*" } }`
+		script = `Register-ArgumentCompleter -CommandName mstore -ScriptBlock { param($w,$a,$p) "scan","import","sync","config","cache","generate","gen","list","show","path","activate","rename","verify","copy","remove","gc","prune","doctor","completion","help" | Where-Object { $_ -like "$w*" } }`
 	default:
 		return usageError("unsupported shell %q", shell)
 	}
@@ -784,6 +786,7 @@ Commands:
   copy, cp             Copy into another local mstore.
   remove, rm           Remove stored versions.
   gc                   Clean stale staging, parts, and locks.
+  prune                Preview or remove abnormal provider cache entries.
   doctor               Diagnose store and cache health.
   completion           Generate shell completion.
   help                 Show this help.
@@ -814,6 +817,7 @@ Selected command options:
   sync:      --provider hf|ms|all  --config FILE  --activate  --hash  --jobs N  --dry-run
   generate:  --config FILE  --all  --current-only  --uv  --hf-mirror
   cache:     path  clean [--path PATH] --yes
+  prune:     --provider hf|ms|all  --status incomplete,invalid,conflict  --dry-run  --yes  --force  --json
 
 Examples:
   mstore sync
@@ -822,6 +826,8 @@ Examples:
   mstore generate --all > download-models.sh
   mstore generate --config models.toml > download-models.sh
   mstore generate --uv --hf-mirror --all > download-models.sh
+  mstore prune --dry-run
+  mstore prune --yes
 `)
 }
 

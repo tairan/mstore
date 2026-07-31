@@ -70,6 +70,7 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 		"  generate, gen        Generate a Bash download script from manifests or config.",
 		"  cache path           Print the mstore download-cache path.",
 		"  cache clean          Remove a marked mstore download cache.",
+		"  prune                Preview or remove abnormal provider cache entries.",
 		"  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).",
 		"  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]",
 		"      Write ./models.toml by default. Existing files are protected unless",

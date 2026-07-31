@@ -43,7 +43,7 @@ func Scan(root string) ([]source.Model, error) {
 		snapshots, err := os.ReadDir(filepath.Join(root, repository.Name(), "snapshots"))
 		if err != nil {
 			out = append(out, source.Model{
-				Provider: "ms", Repo: repo, Status: "incomplete",
+				Provider: "ms", Repo: repo, Path: filepath.Join(root, repository.Name()), Status: "incomplete",
 				Error: fmt.Sprintf("read snapshots: %v", err),
 			})
 			continue

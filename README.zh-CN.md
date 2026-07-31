@@ -5,8 +5,8 @@
 [![CI](https://github.com/tairan/mstore/actions/workflows/ci.yml/badge.svg)](https://github.com/tairan/mstore/actions/workflows/ci.yml)
 
 `mstore` 将 Hugging Face 或 ModelScope 原生缓存中已经下载完成的模型发布到
-便携、不可变的本地模型仓库。它自身不会下载模型，也不会写入 provider 缓存，
-但可以根据已发布模型的 manifest 或模型配置生成 provider 下载脚本。
+便携、不可变的本地模型仓库。它自身不会下载模型；可以生成 provider 下载脚本，
+也可以在显式提供 `--yes` 时清理 provider 缓存中可明确定位的异常项目。
 
 发布后的目录只包含普通文件，因此可以只读挂载到容器、复制到已挂载磁盘、
 进行备份，或在没有数据库的情况下迁移到其他机器。
@@ -237,6 +237,8 @@ mstore rename old-name new-name --dry-run
 mstore remove model@version --yes
 mstore remove model --inactive --yes
 mstore gc --older-than 24h --dry-run
+mstore prune --dry-run
+mstore prune --yes
 mstore doctor --provider all --write-test
 mstore cache path
 mstore cache clean --yes
@@ -246,7 +248,11 @@ mstore cache clean --path /srv/mstore-downloads --yes
 除非显式指定 `--force`，`remove` 会保护当前激活版本。`gc` 只清理 staging
 数据、`.part` 文件和失效锁；它不会删除已发布模型或 provider 缓存。`cache clean`
 必须显式确认，只会删除带有 mstore 所有权标记的缓存根目录；它会拒绝不安全的位置，
-绝不会删除 Hugging Face 或 ModelScope 的 provider 全局缓存。
+绝不会删除 Hugging Face 或 ModelScope 的 provider 全局缓存。`prune` 默认只预览，
+扫描两个 provider 的 `incomplete`、`invalid`、`conflict` 项；只有 `prune --yes`
+才会删除重新校验过的 provider 仓库或 snapshot。ready/imported 项、provider 当前
+revision、ready 来源（包括 ready 的名称冲突）、锁定目标和已发布的 mstore
+版本都会受到保护。
 
 ## CLI 参考
 
@@ -254,7 +260,7 @@ mstore cache clean --path /srv/mstore-downloads --yes
 
 ```text
 scan import sync config cache generate list(ls) show path activate rename verify
-copy(cp) remove(rm) gc doctor completion help
+copy(cp) remove(rm) gc prune doctor completion help
 ```
 
 全局参数必须位于命令之前：
@@ -288,6 +294,8 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 - `remove`：`--inactive`、`--all-versions`、`--force`、`--yes`、
   `--dry-run`
 - `gc`：`--older-than`、`--dry-run`
+- `prune`：`--provider hf|ms|all`、`--status incomplete,invalid,conflict`、
+  `--dry-run`、`--yes`、`--force`、`--json`
 - `doctor`：`--provider`、`--write-test`
 - `completion`：`bash`、`zsh`、`fish` 或 `powershell`
 

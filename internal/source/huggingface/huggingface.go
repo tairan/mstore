@@ -45,7 +45,8 @@ func Scan(root string) ([]source.Model, error) {
 		snapshots := filepath.Join(root, repoDir.Name(), "snapshots")
 		revisions, readErr := os.ReadDir(snapshots)
 		if readErr != nil {
-			out = append(out, source.Model{Provider: "hf", Repo: repo, Status: "incomplete", Error: "missing snapshots"})
+			out = append(out, source.Model{Provider: "hf", Repo: repo,
+				Path: filepath.Join(root, repoDir.Name()), Status: "incomplete", Error: "missing snapshots"})
 			continue
 		}
 		preferred := preferredRevision(filepath.Join(root, repoDir.Name()))

@@ -43,6 +43,14 @@ func TestScanSnapshotAndDanglingSymlink(t *testing.T) {
 	if models[0].Status != "invalid" {
 		t.Fatalf("dangling symlink status = %q", models[0].Status)
 	}
+
+	if err := os.RemoveAll(filepath.Join(root, "models--Acme--Model", "snapshots")); err != nil {
+		t.Fatal(err)
+	}
+	models, err = Scan(root)
+	if err != nil || len(models) != 1 || models[0].Status != "incomplete" || models[0].Path != filepath.Join(root, "models--Acme--Model") {
+		t.Fatalf("incomplete model target: %#v, %v", models, err)
+	}
 }
 
 func TestScanRejectsSymlinkOutsideBlobs(t *testing.T) {

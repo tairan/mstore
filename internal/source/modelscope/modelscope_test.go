@@ -146,7 +146,7 @@ func TestScanReportsUnreadableSnapshotsDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Status != "incomplete" || !strings.Contains(models[0].Error, "read snapshots") {
+	if len(models) != 1 || models[0].Status != "incomplete" || models[0].Path != filepath.Join(root, "BAAI--bge-m3") || !strings.Contains(models[0].Error, "read snapshots") {
 		t.Fatalf("unexpected models: %#v", models)
 	}
 }
