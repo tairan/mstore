@@ -9,162 +9,155 @@ import (
 	"github.com/chieworks/mstore/internal/source"
 )
 
-func TestScanCurrentLayout(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "models")
-	dir := filepath.Join(root, "BAAI--bge-m3", "snapshots", "master")
+func makeRepo(t *testing.T, root, namespace, encoded, marker string, files bool) string {
+	t.Helper()
+	dir := filepath.Join(root, namespace, encoded)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	models, err := Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 1 || models[0].Repo != "BAAI/bge-m3" ||
-		models[0].Path != dir || models[0].Revision != "master" ||
-		models[0].Status != "ready" || !models[0].Preferred {
-		t.Fatalf("unexpected models: %#v", models)
-	}
-}
-
-func TestScanListsMultipleSnapshotsIndependently(t *testing.T) {
-	cache := t.TempDir()
-	root := filepath.Join(cache, "models")
-	for _, revision := range []string{"main", "v1.2.3"} {
-		dir := filepath.Join(root, "Qwen--Demo", "snapshots", revision)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	if marker != "" {
+		if err := os.WriteFile(filepath.Join(dir, ".mv"), []byte(marker), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if files {
 		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("MODELSCOPE_CACHE", cache)
+	return dir
+}
 
-	model, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1.2.3"})
+func TestCacheRoot(t *testing.T) {
+	t.Setenv("MODELSCOPE_CACHE", "")
+	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model.Repo != "Qwen/Demo" || model.Revision != "v1.2.3" ||
-		model.Path != filepath.Join(root, "Qwen--Demo", "snapshots", "v1.2.3") {
-		t.Fatalf("unexpected resolved model: %#v", model)
-	}
-}
-
-func TestResolveRejectsAmbiguousSnapshotSelections(t *testing.T) {
-	cache := t.TempDir()
-	root := filepath.Join(cache, "models")
-	for _, revision := range []string{"v1", "v2"} {
-		dir := filepath.Join(root, "Qwen--Demo", "snapshots", revision)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("MODELSCOPE_CACHE", cache)
-
-	for _, ref := range []source.Ref{
-		{Provider: "ms", Repo: "Qwen/Demo"},
-		{Provider: "ms", Repo: "Qwen/Demo", Revision: "v"},
-	} {
-		_, err := Resolve(ref)
-		if err == nil || !strings.Contains(err.Error(), "multiple revisions") && !strings.Contains(err.Error(), "ambiguous") {
-			t.Fatalf("Resolve(%#v) error = %v", ref, err)
-		}
-	}
-}
-
-func TestResolvePrefersExactSnapshotRevision(t *testing.T) {
-	cache := t.TempDir()
-	root := filepath.Join(cache, "models")
-	for _, revision := range []string{"v1", "v10"} {
-		dir := filepath.Join(root, "Qwen--Demo", "snapshots", revision)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	t.Setenv("MODELSCOPE_CACHE", cache)
-
-	model, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1"})
-	if err != nil || model.Revision != "v1" {
-		t.Fatalf("Resolve exact revision = %#v, %v", model, err)
-	}
-	if err := os.Remove(filepath.Join(root, "Qwen--Demo", "snapshots", "v1", "config.json")); err != nil {
+	root, err := CacheRoot()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1"}); err == nil || !strings.Contains(err.Error(), "invalid") {
-		t.Fatalf("Resolve invalid exact revision error = %v", err)
+	if root != filepath.Join(home, ".cache", "modelscope", "hub", "models") {
+		t.Fatalf("root=%q", root)
+	}
+	cache := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("MODELSCOPE_CACHE", cache)
+	root, err = CacheRoot()
+	if err != nil || root != filepath.Join(cache, "models") {
+		t.Fatalf("root=%q err=%v", root, err)
 	}
 }
 
-func TestScanMarksInvalidSnapshotsNotReady(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "models")
-	dir := filepath.Join(root, "BAAI--bge-m3", "snapshots", "master")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+func TestScanNewLayoutAndMVFormats(t *testing.T) {
+	root := t.TempDir()
+	plain := makeRepo(t, root, "Qwen", "Demo___0___6B", "master", true)
+	makeRepo(t, root, "Qwen", "Other", "Revision:v1.2.3,CreatedAt:2026-07-31T00:00:00Z", true)
 	models, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Status != "invalid" || models[0].Error == "" {
-		t.Fatalf("unexpected models: %#v", models)
+	if len(models) != 2 {
+		t.Fatalf("models=%#v", models)
+	}
+	for _, m := range models {
+		if m.Status != "ready" {
+			t.Fatalf("model=%#v", m)
+		}
+		if m.Repo == "Qwen/Demo.0.6B" && m.Path != plain {
+			t.Fatalf("path=%q", m.Path)
+		}
+		if m.Repo == "Qwen/Other" && m.Revision != "v1.2.3" {
+			t.Fatalf("model=%#v", m)
+		}
 	}
 }
 
-func TestScanIgnoresSnapshotsWithControlCharacters(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "models")
-	dir := filepath.Join(root, "BAAI--bge-m3", "snapshots", "release\nv1")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	models, err := Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 0 {
-		t.Fatalf("unexpected models: %#v", models)
-	}
-}
-
-func TestScanReportsUnreadableSnapshotsDirectory(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "models")
-	if err := os.MkdirAll(filepath.Join(root, "BAAI--bge-m3"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	models, err := Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(models) != 1 || models[0].Status != "incomplete" || models[0].Path != filepath.Join(root, "BAAI--bge-m3") || !strings.Contains(models[0].Error, "read snapshots") {
-		t.Fatalf("unexpected models: %#v", models)
-	}
-}
-
-func TestScanIgnoresLegacyLayout(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "models")
-	legacy := filepath.Join(root, "BAAI", "bge-m3")
+func TestScanStatesAndIgnoresLegacyLayout(t *testing.T) {
+	root := t.TempDir()
+	makeRepo(t, root, "Acme", "Missing", "", true)
+	makeRepo(t, root, "Acme", "Empty", "v1", false)
+	makeRepo(t, root, "Acme", "Bad", "Revision:../escape,CreatedAt:now", true)
+	legacy := filepath.Join(root, "Acme--Legacy", "snapshots", "master")
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(legacy, ".mv"), []byte("master"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(legacy, "config.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	models, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 0 {
-		t.Fatalf("unexpected models: %#v", models)
+	if len(models) != 3 {
+		t.Fatalf("models=%#v", models)
+	}
+	statuses := map[string]string{}
+	for _, m := range models {
+		statuses[m.Repo] = m.Status
+	}
+	if statuses["Acme/Missing"] != "incomplete" || statuses["Acme/Empty"] != "invalid" || statuses["Acme/Bad"] != "invalid" {
+		t.Fatalf("statuses=%#v", statuses)
+	}
+}
+
+func TestScanRejectsTemporaryAndDanglingFiles(t *testing.T) {
+	root := t.TempDir()
+	dir := makeRepo(t, root, "Acme", "Broken", "v1", true)
+	if err := os.WriteFile(filepath.Join(dir, "part.tmp"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	models, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Status != "invalid" {
+		t.Fatalf("models=%#v", models)
+	}
+	if err := os.Remove(filepath.Join(dir, "part.tmp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing", filepath.Join(dir, "model.bin")); err != nil {
+		t.Fatal(err)
+	}
+	models, err = Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0].Status != "invalid" {
+		t.Fatalf("models=%#v", models)
+	}
+}
+
+func TestResolveExactAndPrefixRevision(t *testing.T) {
+	cache := t.TempDir()
+	root := filepath.Join(cache, "models")
+	makeRepo(t, root, "Qwen", "Demo", "v1", true)
+	// A repository directory represents one cached revision; an exact value and
+	// a unique prefix must both resolve through the canonical source identity.
+	t.Setenv("MODELSCOPE_CACHE", cache)
+	model, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1"})
+	if err != nil || model.Revision != "v1" {
+		t.Fatalf("model=%#v err=%v", model, err)
+	}
+	if _, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Resolve(source.Ref{Provider: "ms", Repo: "Qwen/Demo", Revision: "v1/"}); err == nil || !strings.Contains(err.Error(), "invalid ModelScope revision") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRepoPathEncoding(t *testing.T) {
+	root := t.TempDir()
+	path, err := RepoPath(root, "Qwen/Demo.0.6B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, "Qwen", "Demo___0___6B"); path != want {
+		t.Fatalf("path=%q want=%q", path, want)
+	}
+	if _, err := RepoPath(root, "Qwen/../escape"); err == nil {
+		t.Fatal("unsafe repo accepted")
 	}
 }

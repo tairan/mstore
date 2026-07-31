@@ -177,11 +177,14 @@ func TestCLIPruneSkipsMultipleUnimportedNameConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	ms := t.TempDir()
-	msSnapshot := filepath.Join(ms, "models", "Other--Same", "snapshots", "rev")
-	if err := os.MkdirAll(msSnapshot, 0o755); err != nil {
+	msRepo := filepath.Join(ms, "models", "Other", "Same")
+	if err := os.MkdirAll(msRepo, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(msSnapshot, "config.json"), []byte("{}"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(msRepo, ".mv"), []byte("rev"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(msRepo, "config.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HF_HUB_CACHE", hf)
@@ -205,5 +208,26 @@ func TestCLIPruneSkipsMultipleUnimportedNameConflicts(t *testing.T) {
 	}
 	if strings.Contains(out.String(), `"action":"delete"`) {
 		t.Fatalf("ambiguous source was scheduled for deletion: %s", out.String())
+	}
+}
+
+func TestCLIPruneModelScopeRemovesExactRepositoryDirectory(t *testing.T) {
+	cache := t.TempDir()
+	repo := filepath.Join(cache, "models", "Acme", "Broken___Model")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", cache)
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", t.TempDir(), "prune", "--provider", "ms", "--yes"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(repo); !os.IsNotExist(err) {
+		t.Fatalf("repository directory remains: %v", err)
 	}
 }

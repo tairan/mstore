@@ -64,12 +64,12 @@ snapshot 时会跟随符号链接，发布后的模型只包含普通文件。�
 ModelScope 缓存按以下顺序查找：
 
 1. `$MODELSCOPE_CACHE/models`
-2. `~/.cache/modelscope/models`
+2. `~/.cache/modelscope/hub/models`
 
-这是一个破坏性变更：仅支持当前 ModelScope CLI 的
-`models/<namespace>--<repo>/snapshots/<revision>/` 布局。每个 snapshot 都会被
-独立列出和导入。旧的 `models/<namespace>/<repo>` `.mv` 缓存不会被扫描，必须使用
-当前 CLI 重新下载。
+仅支持当前 ModelScope CLI 的 `models/<namespace>/<repo>/` 布局。仓库目录名中的
+`.` 编码为 `___`；`.mv` 可以只包含 revision，也可以使用
+`Revision:<revision>,CreatedAt:<time>` 格式。只有存在有效 `.mv` 且文件树非空、有效时，
+来源才会标记为 ready。
 
 ## 仓库布局
 
@@ -115,7 +115,7 @@ provider 缓存会被跳过，incomplete revision 会被忽略；单个模型失
 
 只有显式指定 `--activate`，`sync` 才会修改 `current`。启用激活后，
 Hugging Face 按 `refs/main`、`refs/master` 的顺序选择，ModelScope 优先使用
-`master` snapshot；如果一个仓库只有一个 ready revision，则将其作为兜底选择。
+`master` revision；如果一个仓库只有一个 ready revision，则将其作为兜底选择。
 
 ### 使用模型配置进行受控同步
 

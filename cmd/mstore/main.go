@@ -811,6 +811,7 @@ Model config:
 Source references:
   hf:NAMESPACE/REPO[@REVISION]
   ms:NAMESPACE/REPO[@REVISION]
+  ModelScope cache: $MODELSCOPE_CACHE/models or ~/.cache/modelscope/hub/models
 
 Selected command options:
   import:    --name NAME  --version VER  --activate  --hash  --jobs N  --dry-run

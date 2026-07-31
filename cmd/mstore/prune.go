@@ -357,16 +357,13 @@ func validatePruneTarget(item pruneItem) error {
 }
 
 func expectedPruneTarget(root string, item pruneItem) (string, error) {
-	var repoDir string
-	switch item.Provider {
-	case "hf":
-		repoDir = "models--" + strings.ReplaceAll(item.Repo, "/", "--")
-	case "ms":
-		repoDir = strings.ReplaceAll(item.Repo, "/", "--")
-	default:
+	if item.Provider == "ms" {
+		return modelscope.RepoPath(root, item.Repo)
+	}
+	if item.Provider != "hf" {
 		return "", fmt.Errorf("unsupported provider %q", item.Provider)
 	}
-	repoPath := filepath.Join(root, repoDir)
+	repoPath := filepath.Join(root, "models--"+strings.ReplaceAll(item.Repo, "/", "--"))
 	if item.Status == "incomplete" {
 		return repoPath, nil
 	}
