@@ -231,3 +231,31 @@ func TestCLIPruneModelScopeRemovesExactRepositoryDirectory(t *testing.T) {
 		t.Fatalf("repository directory remains: %v", err)
 	}
 }
+
+func TestCLIPruneRemovesStaleTemporaryFilesAndLocks(t *testing.T) {
+	hf := t.TempDir()
+	snapshot := filepath.Join(hf, "models--Acme--Interrupted", "snapshots", "rev")
+	if err := os.MkdirAll(snapshot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(snapshot, "weights.tmp"), []byte("partial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := filepath.Join(hf, ".locks", "models--Acme--Interrupted")
+	if err := os.MkdirAll(lockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockDir, "weights.lock"), []byte("999999999\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HF_HUB_CACHE", hf)
+	t.Setenv("MODELSCOPE_CACHE", filepath.Join(t.TempDir(), "missing"))
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", t.TempDir(), "prune", "--yes", "--force"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(snapshot); !os.IsNotExist(err) {
+		t.Fatalf("stale interrupted snapshot remains: %v", err)
+	}
+}

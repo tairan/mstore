@@ -53,11 +53,12 @@ func TestScanNewLayoutAndMVFormats(t *testing.T) {
 	root := t.TempDir()
 	plain := makeRepo(t, root, "Qwen", "Demo___0___6B", "master", true)
 	makeRepo(t, root, "Qwen", "Other", "Revision:v1.2.3,CreatedAt:2026-07-31T00:00:00Z", true)
+	makeRepo(t, root, "Qwen", "snapshots", "release", true)
 	models, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 2 {
+	if len(models) != 3 {
 		t.Fatalf("models=%#v", models)
 	}
 	for _, m := range models {

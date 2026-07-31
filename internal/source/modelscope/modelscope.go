@@ -45,7 +45,7 @@ func encodeRepoPath(repo string) (string, string, error) {
 }
 
 func decodeRepoPath(namespace, encoded string) (string, error) {
-	if !validPathPart(namespace) || !validPathPart(encoded) || encoded == "snapshots" {
+	if !validPathPart(namespace) || !validPathPart(encoded) {
 		return "", fmt.Errorf("invalid ModelScope repository path")
 	}
 	repo := strings.ReplaceAll(encoded, "___", ".")
@@ -98,14 +98,12 @@ func Scan(root string) ([]source.Model, error) {
 		}
 		namespacePath := filepath.Join(root, namespace.Name())
 		// A direct <namespace>--<repo>/snapshots tree is the removed layout.
-		if strings.Contains(namespace.Name(), "--") {
-			if info, readErr := os.Stat(filepath.Join(namespacePath, "snapshots")); readErr == nil && info.IsDir() {
-				continue
-			}
+		if isLegacyRepository(namespacePath, namespace.Name()) {
+			continue
 		}
 		repositories, readErr := os.ReadDir(namespacePath)
 		if readErr != nil {
-			continue
+			return nil, fmt.Errorf("read ModelScope namespace %s: %w", namespace.Name(), readErr)
 		}
 		for _, repository := range repositories {
 			if !repository.IsDir() {
@@ -138,6 +136,33 @@ func Scan(root string) ([]source.Model, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref() < out[j].Ref() })
 	return out, nil
+}
+
+func isLegacyRepository(namespacePath, namespace string) bool {
+	if !strings.Contains(namespace, "--") {
+		return false
+	}
+	snapshots := filepath.Join(namespacePath, "snapshots")
+	info, err := os.Stat(snapshots)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	// In the removed layout, snapshots is structural and has revision
+	// subdirectories. A new repository named snapshots has its .mv at this
+	// level, so it remains scannable.
+	if _, err := os.Stat(filepath.Join(snapshots, ".mv")); err == nil {
+		return false
+	}
+	entries, err := os.ReadDir(snapshots)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func Resolve(r source.Ref) (source.Model, error) {

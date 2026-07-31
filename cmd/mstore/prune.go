@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/chieworks/mstore/internal/fsutil"
+	"github.com/chieworks/mstore/internal/lock"
 	"github.com/chieworks/mstore/internal/naming"
 	"github.com/chieworks/mstore/internal/providers"
 	"github.com/chieworks/mstore/internal/source"
@@ -274,7 +274,7 @@ func executePrune(s *store.Store, report *pruneReport, provider string, statuses
 			failures = append(failures, err.Error())
 			continue
 		}
-		if err := os.RemoveAll(item.Path); err != nil {
+		if err := removePruneTarget(*item); err != nil {
 			item.Action, item.Error = "failed", fmt.Errorf("remove %s: %w", item.Path, err).Error()
 			failures = append(failures, item.Error)
 		}
@@ -347,11 +347,15 @@ func validatePruneTarget(item pruneItem) error {
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("refusing to remove symlinked path outside provider cache: %s", path)
 	}
-	if hasPruneLock(path) {
-		return fmt.Errorf("target is locked or incomplete: %s", path)
+	if locked, err := hasPruneLock(path); err != nil {
+		return fmt.Errorf("inspect target locks %s: %w", path, err)
+	} else if locked {
+		return fmt.Errorf("target is locked: %s", path)
 	}
-	if hasProviderLock(root, item) {
-		return fmt.Errorf("target is locked or incomplete: %s", path)
+	if locked, err := hasProviderLock(root, item); err != nil {
+		return fmt.Errorf("inspect provider locks %s: %w", path, err)
+	} else if locked {
+		return fmt.Errorf("target is locked: %s", path)
 	}
 	return nil
 }
@@ -373,40 +377,99 @@ func expectedPruneTarget(root string, item pruneItem) (string, error) {
 	return filepath.Join(repoPath, "snapshots", item.Revision), nil
 }
 
-func hasProviderLock(root string, item pruneItem) bool {
+func hasProviderLock(root string, item pruneItem) (bool, error) {
 	if item.Provider != "hf" {
-		return false
+		return false, nil
 	}
 	lockRoot := filepath.Join(root, ".locks", "models--"+strings.ReplaceAll(item.Repo, "/", "--"))
 	locked := false
-	_ = filepath.WalkDir(lockRoot, func(_ string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(lockRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if strings.HasSuffix(entry.Name(), ".lock") {
-			locked = true
-			return fs.SkipDir
-		}
-		return nil
-	})
-	return locked
-}
-
-func hasPruneLock(path string) bool {
-	locked := false
-	_ = filepath.WalkDir(path, func(current string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if current != path && (strings.HasSuffix(entry.Name(), ".lock") || fsutil.IsTemporary(current)) {
-			locked = true
-			if entry.IsDir() {
+			active, activeErr := lock.Active(path)
+			if activeErr != nil {
+				return activeErr
+			}
+			if active {
+				locked = true
 				return fs.SkipDir
 			}
 		}
 		return nil
 	})
-	return locked
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return locked, err
+}
+
+func hasPruneLock(path string) (bool, error) {
+	locked := false
+	err := filepath.WalkDir(path, func(current string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if current != path && strings.HasSuffix(entry.Name(), ".lock") {
+			active, activeErr := lock.Active(current)
+			if activeErr != nil {
+				return activeErr
+			}
+			if active {
+				locked = true
+				if entry.IsDir() {
+					return fs.SkipDir
+				}
+			}
+		}
+		return nil
+	})
+	return locked, err
+}
+
+func removePruneTarget(item pruneItem) error {
+	root, err := providerCacheRoot(item.Provider)
+	if err != nil {
+		return err
+	}
+	path := item.Path
+	parent := filepath.Dir(path)
+	claim := filepath.Join(parent, ".mstore-prune-"+fmt.Sprintf("%d", os.Getpid()))
+	for i := 0; ; i++ {
+		if i > 0 {
+			claim = filepath.Join(parent, fmt.Sprintf(".mstore-prune-%d-%d", os.Getpid(), i))
+		}
+		if _, statErr := os.Lstat(claim); os.IsNotExist(statErr) {
+			break
+		} else if statErr != nil {
+			return statErr
+		}
+	}
+	if err := os.Rename(path, claim); err != nil {
+		return err
+	}
+	restore := true
+	defer func() {
+		if restore {
+			_ = os.Rename(claim, path)
+		}
+	}()
+	if locked, lockErr := hasProviderLock(root, item); lockErr != nil {
+		return lockErr
+	} else if locked {
+		return fmt.Errorf("target became locked during deletion")
+	}
+	if locked, lockErr := hasPruneLock(claim); lockErr != nil {
+		return lockErr
+	} else if locked {
+		return fmt.Errorf("target became locked during deletion")
+	}
+	if err := os.RemoveAll(claim); err != nil {
+		return err
+	}
+	restore = false
+	return nil
 }
 
 func providerCacheRoot(provider string) (string, error) {

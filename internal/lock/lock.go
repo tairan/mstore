@@ -71,3 +71,24 @@ func bytesTrimSpace(b []byte) []byte {
 }
 
 func (l *Lock) Release() error { return os.Remove(l.path) }
+
+// Active reports whether the PID recorded in a lock file still exists. An
+// unreadable or malformed lock is treated as active so callers fail closed.
+func Active(path string) (bool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	pid, err := strconv.Atoi(string(bytesTrimSpace(b)))
+	if err != nil || pid <= 0 {
+		return true, nil
+	}
+	_, err = os.Stat(filepath.Join("/proc", strconv.Itoa(pid)))
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return true, err
+}
