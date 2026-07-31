@@ -6,8 +6,8 @@
 
 `mstore` publishes models that are already present in the native Hugging Face
 or ModelScope cache into a portable, immutable local model store. It does not
-download models itself or write to provider caches, but it can generate a
-provider download script from published model manifests or a model config.
+download models itself. It can generate provider download scripts and, with an
+explicit `--yes`, prune identifiable abnormal entries from provider caches.
 
 The resulting directories are ordinary files, so they can be mounted
 read-only into containers, copied to mounted disks, backed up, or moved to
@@ -67,13 +67,12 @@ rejected.
 ModelScope cache lookup is:
 
 1. `$MODELSCOPE_CACHE/models`
-2. `~/.cache/modelscope/models`
+2. `~/.cache/modelscope/hub/models`
 
-This is a breaking change: only the current ModelScope CLI cache layout,
-`models/<namespace>--<repo>/snapshots/<revision>/`, is supported. Each
-snapshot is independently listed and importable. Legacy `.mv` caches at
-`models/<namespace>/<repo>` are not scanned and must be downloaded again with
-the current CLI.
+Only the current ModelScope CLI cache layout, `models/<namespace>/<repo>/`, is
+supported. Repository directory names encode `.` as `___`; `.mv` contains the
+revision (either the revision alone or `Revision:<revision>,CreatedAt:<time>`).
+A valid `.mv` and a non-empty valid file tree are required for a ready source.
 
 ## Store layout
 
@@ -122,7 +121,7 @@ the others. Name conflicts fail without choosing an arbitrary owner.
 
 `sync` does not change `current` unless `--activate` is supplied. With
 activation enabled, Hugging Face prefers `refs/main` then `refs/master`, and
-ModelScope prefers the `master` snapshot; a repository with exactly one ready revision uses
+ModelScope prefers the `master` revision; a repository with exactly one ready revision uses
 that revision as a fallback.
 
 ### Controlled sync with a model config
@@ -263,6 +262,8 @@ mstore rename old-name new-name --dry-run
 mstore remove model@version --yes
 mstore remove model --inactive --yes
 mstore gc --older-than 24h --dry-run
+mstore prune --dry-run
+mstore prune --yes
 mstore doctor --provider all --write-test
 mstore cache path
 mstore cache clean --yes
@@ -273,7 +274,12 @@ mstore cache clean --path /srv/mstore-downloads --yes
 cleans staging data, `.part` files, and stale locks; it never deletes published
 models or provider caches. `cache clean` is opt-in and removes only a cache root
 carrying mstore's ownership marker; it rejects unsafe locations and never
-deletes Hugging Face or ModelScope provider-wide caches.
+deletes Hugging Face or ModelScope provider-wide caches. `prune` defaults to a
+dry-run across both providers and covers `incomplete`, `invalid`, and `conflict`
+entries. Only `prune --yes` removes precisely revalidated provider repositories
+or snapshots; ready sources (including ready name conflicts), imported entries,
+active provider revisions, locked targets, and published mstore versions are
+protected.
 
 ## CLI reference
 
@@ -281,7 +287,7 @@ Top-level commands:
 
 ```text
 scan import sync config cache generate list(ls) show path activate rename verify
-copy(cp) remove(rm) gc doctor completion help
+copy(cp) remove(rm) gc prune doctor completion help
 ```
 
 Global options must precede the command:
@@ -314,6 +320,8 @@ Important command options:
   `--verify none|quick|full`, `--jobs`, `--dry-run`
 - `remove`: `--inactive`, `--all-versions`, `--force`, `--yes`, `--dry-run`
 - `gc`: `--older-than`, `--dry-run`
+- `prune`: `--provider hf|ms|all`, `--status incomplete,invalid,conflict`,
+  `--dry-run`, `--yes`, `--force`, `--json`
 - `doctor`: `--provider`, `--write-test`
 - `completion`: `bash`, `zsh`, `fish`, or `powershell`
 

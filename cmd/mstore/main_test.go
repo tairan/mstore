@@ -70,8 +70,10 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 		"  generate, gen        Generate a Bash download script from manifests or config.",
 		"  cache path           Print the mstore download-cache path.",
 		"  cache clean          Remove a marked mstore download cache.",
+		"  prune                Preview or remove abnormal provider cache entries.",
 		"  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).",
 		"  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]",
+		"  ModelScope cache: $MODELSCOPE_CACHE/models or ~/.cache/modelscope/hub/models",
 		"      Write ./models.toml by default. Existing files are protected unless",
 		"  generate:  --config FILE  --all  --current-only  --uv  --hf-mirror",
 		"  mstore generate --all > download-models.sh",
@@ -261,8 +263,11 @@ func TestCLISyncConfigWithNoEnabledModelsDoesNotFallBackToFullSync(t *testing.T)
 
 func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 	cache := t.TempDir()
-	dir := filepath.Join(cache, "models", "Qwen--Demo-0.6B", "snapshots", "master")
+	dir := filepath.Join(cache, "models", "Qwen", "Demo___0___6B")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".mv"), []byte("master"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
@@ -283,14 +288,14 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 	versions, err := s.List("")
-	if err != nil || len(versions) != 1 || versions[0].Manifest.Source.Repo != "Qwen/Demo-0.6B" || versions[0].Manifest.Source.Revision != "master" {
+	if err != nil || len(versions) != 1 || versions[0].Manifest.Source.Repo != "Qwen/Demo.0.6B" || versions[0].Manifest.Source.Revision != "master" {
 		t.Fatalf("synced versions: %#v, %v", versions, err)
 	}
 
 	out.Reset()
 	errOut.Reset()
 	code = run([]string{"--store", storeRoot, "generate", "--all"}, &out, &errOut)
-	want := "modelscope download --model 'Qwen/Demo-0.6B' --revision 'master'"
+	want := "modelscope download --model 'Qwen/Demo.0.6B' --revision 'master'"
 	if code != 0 || !strings.Contains(out.String(), want) {
 		t.Fatalf("generate code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
@@ -298,9 +303,12 @@ func TestCLISyncAndGenerateUseCanonicalModelScopeRepo(t *testing.T) {
 
 func TestCLIImportAndSyncConfigUseCurrentModelScopeLayout(t *testing.T) {
 	cache := t.TempDir()
-	for _, revision := range []string{"master", "v1"} {
-		dir := filepath.Join(cache, "models", "BAAI--bge-m3", "snapshots", revision)
+	for repo, revision := range map[string]string{"bge-m3": "master", "bge-m3-v1": "v1"} {
+		dir := filepath.Join(cache, "models", "BAAI", repo)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".mv"), []byte(revision), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(revision), 0o644); err != nil {
@@ -314,7 +322,7 @@ func TestCLIImportAndSyncConfigUseCurrentModelScopeLayout(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run([]string{"scan", "--provider", "ms"}, &out, &errOut); code != 0 ||
 		!strings.Contains(out.String(), "ms:BAAI/bge-m3@master") ||
-		!strings.Contains(out.String(), "ms:BAAI/bge-m3@v1") {
+		!strings.Contains(out.String(), "ms:BAAI/bge-m3-v1@v1") {
 		t.Fatalf("scan code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -323,7 +331,7 @@ func TestCLIImportAndSyncConfigUseCurrentModelScopeLayout(t *testing.T) {
 		t.Fatalf("import code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 	config := filepath.Join(t.TempDir(), "models.toml")
-	if err := os.WriteFile(config, []byte("schema = 1\n\n[[models]]\nsource = \"ms:BAAI/bge-m3@v1\"\nenabled = true\nname = \"bge-m3-v1\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(config, []byte("schema = 1\n\n[[models]]\nsource = \"ms:BAAI/bge-m3-v1@v1\"\nenabled = true\nname = \"bge-m3-v1\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	out.Reset()
