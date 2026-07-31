@@ -1,6 +1,7 @@
 package modelscope
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,8 +67,14 @@ func validRepoPart(part string) bool {
 }
 
 func validRevision(revision string) bool {
-	return validPathPart(revision) && !strings.HasPrefix(revision, ".")
+	return validPathPart(revision) && !strings.HasPrefix(revision, ".") &&
+		revision != "current" && !strings.ContainsRune(revision, '@')
 }
+
+type revisionReadError struct{ err error }
+
+func (e *revisionReadError) Error() string { return e.err.Error() }
+func (e *revisionReadError) Unwrap() error { return e.err }
 
 func readRevision(path string) (string, error) {
 	b, err := os.ReadFile(filepath.Join(path, ".mv"))
@@ -75,7 +82,7 @@ func readRevision(path string) (string, error) {
 		if os.IsNotExist(err) {
 			return "", os.ErrNotExist
 		}
-		return "", fmt.Errorf("read .mv: %w", err)
+		return "", &revisionReadError{err: fmt.Errorf("read .mv: %w", err)}
 	}
 	raw := strings.TrimSpace(string(b))
 	if strings.HasPrefix(raw, "Revision:") {
@@ -122,6 +129,10 @@ func Scan(root string) ([]source.Model, error) {
 			m := source.Model{Provider: "ms", Repo: repo, Path: dir}
 			revision, revisionErr := readRevision(dir)
 			if revisionErr != nil {
+				var readErr *revisionReadError
+				if errors.As(revisionErr, &readErr) {
+					return nil, fmt.Errorf("read ModelScope repository %s: %w", repo, readErr)
+				}
 				if revisionErr == os.ErrNotExist {
 					m.Status, m.Error = "incomplete", "missing .mv"
 				} else {

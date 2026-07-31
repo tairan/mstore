@@ -259,3 +259,48 @@ func TestCLIPruneRemovesStaleTemporaryFilesAndLocks(t *testing.T) {
 		t.Fatalf("stale interrupted snapshot remains: %v", err)
 	}
 }
+
+func TestCLIPruneProtectsImportedRepositoryWhenRevisionIsLost(t *testing.T) {
+	cache := t.TempDir()
+	repo := filepath.Join(cache, "models", "Acme", "Widget")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".mv"), []byte("Revision:../lost,CreatedAt:now"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", cache)
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceDir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Import(source.Model{Provider: "ms", Repo: "Acme/Widget", Revision: "known", Path: sourceDir, Status: "ready"}, store.ImportOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", storeRoot, "prune", "--provider", "ms", "--json"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), `"action":"keep"`) {
+		t.Fatalf("imported repository was not protected: %s", out.String())
+	}
+}
+
+func TestCLIPruneRejectsProviderStoreRootOverlap(t *testing.T) {
+	cache := t.TempDir()
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", cache)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", cache, "prune", "--provider", "ms"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "overlaps ms provider cache root") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}

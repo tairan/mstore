@@ -158,6 +158,22 @@ func TestScanRejectsTemporaryAndDanglingFiles(t *testing.T) {
 	}
 }
 
+func TestScanRejectsReservedRevisions(t *testing.T) {
+	root := t.TempDir()
+	for name, revision := range map[string]string{"Current": "current", "At": "release@v1", "Hidden": ".release"} {
+		makeRepo(t, root, "Acme", name, revision, true)
+	}
+	models, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range models {
+		if model.Status != "invalid" {
+			t.Fatalf("model=%#v", model)
+		}
+	}
+}
+
 func TestResolveExactAndPrefixRevision(t *testing.T) {
 	cache := t.TempDir()
 	root := filepath.Join(cache, "models")

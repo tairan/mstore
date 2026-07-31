@@ -113,6 +113,9 @@ func buildPruneReport(s *store.Store, provider string, statuses map[string]bool,
 	if err != nil {
 		return report, err
 	}
+	if err := validatePruneRoots(s, provider); err != nil {
+		return report, err
+	}
 	models, scanErrs := providers.Scan(provider)
 	for _, scanErr := range scanErrs {
 		if errors.Is(scanErr, os.ErrNotExist) {
@@ -147,7 +150,7 @@ func buildPruneReport(s *store.Store, provider string, statuses map[string]bool,
 		}
 		pruneItem := pruneItemFromModel(item.model, action, reason)
 		if pruneItem.Action == "delete" {
-			if err := validatePruneTarget(pruneItem); err != nil {
+			if err := validatePruneTarget(s, pruneItem); err != nil {
 				pruneItem.Action = "skip"
 				pruneItem.Reason = err.Error()
 			}
@@ -162,9 +165,11 @@ func buildPruneReport(s *store.Store, provider string, statuses map[string]bool,
 
 func classifyPruneModels(models []source.Model, versions []store.Version) ([]pruneModel, map[string][]store.Version) {
 	imported := map[string]bool{}
+	importedRepos := map[string]bool{}
 	owners := map[string][]store.Version{}
 	for _, version := range versions {
 		imported[identityKey(version.Manifest.Source.Provider, version.Manifest.Source.Repo, version.Manifest.Source.Revision)] = true
+		importedRepos[sourceKey(version.Manifest.Source.Provider, version.Manifest.Source.Repo)] = true
 		owners[version.Name] = append(owners[version.Name], version)
 	}
 
@@ -174,6 +179,10 @@ func classifyPruneModels(models []source.Model, versions []store.Version) ([]pru
 		model := models[i]
 		providerReady := model.Status == "ready"
 		if imported[identityKey(model.Provider, model.Repo, model.Revision)] {
+			continue
+		}
+		if model.Revision == "" && importedRepos[sourceKey(model.Provider, model.Repo)] {
+			classified = append(classified, pruneModel{model: model, owner: true, ownerReason: "imported in mstore"})
 			continue
 		}
 		if model.Status == "ready" {
@@ -269,7 +278,7 @@ func executePrune(s *store.Store, report *pruneReport, provider string, statuses
 			item.Reason = "target changed since scan"
 			continue
 		}
-		if err := validatePruneTarget(*item); err != nil {
+		if err := validatePruneTarget(s, *item); err != nil {
 			item.Action, item.Error = "failed", err.Error()
 			failures = append(failures, err.Error())
 			continue
@@ -301,7 +310,7 @@ func hasMatchingDelete(items []pruneItem, want pruneItem) bool {
 	return false
 }
 
-func validatePruneTarget(item pruneItem) error {
+func validatePruneTarget(s *store.Store, item pruneItem) error {
 	root, err := providerCacheRoot(item.Provider)
 	if err != nil {
 		return err
@@ -358,6 +367,39 @@ func validatePruneTarget(item pruneItem) error {
 		return fmt.Errorf("target is locked: %s", path)
 	}
 	return nil
+}
+
+func validatePruneRoots(s *store.Store, provider string) error {
+	providersToCheck := []string{provider}
+	if provider == "all" {
+		providersToCheck = []string{"hf", "ms"}
+	}
+	storeRoot, err := filepath.Abs(filepath.Clean(s.Root))
+	if err != nil {
+		return err
+	}
+	for _, name := range providersToCheck {
+		cacheRoot, rootErr := providerCacheRoot(name)
+		if rootErr != nil {
+			return rootErr
+		}
+		cacheRoot, rootErr = filepath.Abs(filepath.Clean(cacheRoot))
+		if rootErr != nil {
+			return rootErr
+		}
+		if pathsOverlap(storeRoot, cacheRoot) {
+			return fmt.Errorf("refusing to prune: store root overlaps %s provider cache root", name)
+		}
+	}
+	return nil
+}
+
+func pathsOverlap(a, b string) bool {
+	inside := func(root, path string) bool {
+		rel, err := filepath.Rel(root, path)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	return inside(a, b) || inside(b, a)
 }
 
 func expectedPruneTarget(root string, item pruneItem) (string, error) {
