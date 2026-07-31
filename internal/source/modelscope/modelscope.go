@@ -38,18 +38,19 @@ func RepoPath(root, repo string) (string, error) {
 
 func encodeRepoPath(repo string) (string, string, error) {
 	parts := strings.Split(repo, "/")
-	if len(parts) != 2 || !validPathPart(parts[0]) || !validPathPart(parts[1]) {
+	if len(parts) != 2 || !validRepoPart(parts[0]) || !validRepoPart(parts[1]) {
 		return "", "", fmt.Errorf("invalid ModelScope repository %q", repo)
 	}
-	return parts[0], strings.ReplaceAll(parts[1], ".", "___"), nil
+	return strings.ReplaceAll(parts[0], ".", "___"), strings.ReplaceAll(parts[1], ".", "___"), nil
 }
 
 func decodeRepoPath(namespace, encoded string) (string, error) {
 	if !validPathPart(namespace) || !validPathPart(encoded) {
 		return "", fmt.Errorf("invalid ModelScope repository path")
 	}
+	namespace = strings.ReplaceAll(namespace, "___", ".")
 	repo := strings.ReplaceAll(encoded, "___", ".")
-	if !validPathPart(repo) {
+	if !validRepoPart(namespace) || !validRepoPart(repo) {
 		return "", fmt.Errorf("invalid ModelScope repository path")
 	}
 	return namespace + "/" + repo, nil
@@ -60,8 +61,12 @@ func validPathPart(part string) bool {
 		strings.IndexFunc(part, unicode.IsControl) < 0 && !strings.ContainsAny(part, `/\\`)
 }
 
+func validRepoPart(part string) bool {
+	return validPathPart(part) && !strings.HasPrefix(part, ".")
+}
+
 func validRevision(revision string) bool {
-	return validPathPart(revision)
+	return validPathPart(revision) && !strings.HasPrefix(revision, ".")
 }
 
 func readRevision(path string) (string, error) {
@@ -93,7 +98,7 @@ func Scan(root string) ([]source.Model, error) {
 	}
 	var out []source.Model
 	for _, namespace := range namespaces {
-		if !namespace.IsDir() || !validPathPart(namespace.Name()) {
+		if !namespace.IsDir() || !validRepoPart(namespace.Name()) {
 			continue
 		}
 		namespacePath := filepath.Join(root, namespace.Name())
@@ -106,7 +111,7 @@ func Scan(root string) ([]source.Model, error) {
 			continue
 		}
 		for _, repository := range repositories {
-			if !repository.IsDir() {
+			if !repository.IsDir() || !validRepoPart(repository.Name()) {
 				continue
 			}
 			repo, decodeErr := decodeRepoPath(namespace.Name(), repository.Name())

@@ -449,32 +449,19 @@ func removePruneTarget(item pruneItem) (err error) {
 	if err := os.Rename(path, claim); err != nil {
 		return err
 	}
-	restore := true
-	defer func() {
-		if restore {
-			if restoreErr := os.Rename(claim, path); restoreErr != nil {
-				if err == nil {
-					err = fmt.Errorf("restore claimed target %s: %w (claimed data remains at %s)", path, restoreErr, claim)
-				} else {
-					err = fmt.Errorf("%w; restore claimed target %s: %v (claimed data remains at %s)", err, path, restoreErr, claim)
-				}
-			}
-		}
-	}()
 	if locked, lockErr := hasProviderLock(root, item); lockErr != nil {
-		return lockErr
+		return fmt.Errorf("%w (claimed data remains at %s)", lockErr, claim)
 	} else if locked {
-		return fmt.Errorf("target became locked during deletion")
+		return fmt.Errorf("target became locked during deletion (claimed data remains at %s)", claim)
 	}
 	if locked, lockErr := hasPruneLock(claim); lockErr != nil {
-		return lockErr
+		return fmt.Errorf("%w (claimed data remains at %s)", lockErr, claim)
 	} else if locked {
-		return fmt.Errorf("target became locked during deletion")
+		return fmt.Errorf("target became locked during deletion (claimed data remains at %s)", claim)
 	}
 	if err := os.RemoveAll(claim); err != nil {
-		return err
+		return fmt.Errorf("remove claimed data %s: %w", claim, err)
 	}
-	restore = false
 	return nil
 }
 

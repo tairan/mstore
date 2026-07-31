@@ -113,6 +113,23 @@ func TestScanStatesAndIgnoresLegacyLayout(t *testing.T) {
 	}
 }
 
+func TestScanIgnoresHiddenCacheDirectories(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".cache", "download"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "Acme", ".staging"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	models, err := Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("models=%#v", models)
+	}
+}
+
 func TestScanRejectsTemporaryAndDanglingFiles(t *testing.T) {
 	root := t.TempDir()
 	dir := makeRepo(t, root, "Acme", "Broken", "v1", true)
@@ -162,11 +179,11 @@ func TestResolveExactAndPrefixRevision(t *testing.T) {
 
 func TestRepoPathEncoding(t *testing.T) {
 	root := t.TempDir()
-	path, err := RepoPath(root, "Qwen/Demo.0.6B")
+	path, err := RepoPath(root, "Org.Name/Demo.0.6B")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(root, "Qwen", "Demo___0___6B"); path != want {
+	if want := filepath.Join(root, "Org___Name", "Demo___0___6B"); path != want {
 		t.Fatalf("path=%q want=%q", path, want)
 	}
 	if _, err := RepoPath(root, "Qwen/../escape"); err == nil {
