@@ -98,12 +98,12 @@ func Scan(root string) ([]source.Model, error) {
 		}
 		namespacePath := filepath.Join(root, namespace.Name())
 		// A direct <namespace>--<repo>/snapshots tree is the removed layout.
-		if isLegacyRepository(namespacePath, namespace.Name()) {
-			continue
-		}
 		repositories, readErr := os.ReadDir(namespacePath)
 		if readErr != nil {
 			return nil, fmt.Errorf("read ModelScope namespace %s: %w", namespace.Name(), readErr)
+		}
+		if isLegacyRepository(namespacePath, namespace.Name(), repositories) {
+			continue
 		}
 		for _, repository := range repositories {
 			if !repository.IsDir() {
@@ -125,7 +125,7 @@ func Scan(root string) ([]source.Model, error) {
 				out = append(out, m)
 				continue
 			}
-			m.Revision, m.Preferred = revision, revision == "master"
+			m.Revision, m.Preferred = revision, true
 			if _, _, scanErr := fsutil.Scan(dir, false); scanErr != nil {
 				m.Status, m.Error = "invalid", scanErr.Error()
 			} else {
@@ -138,8 +138,11 @@ func Scan(root string) ([]source.Model, error) {
 	return out, nil
 }
 
-func isLegacyRepository(namespacePath, namespace string) bool {
+func isLegacyRepository(namespacePath, namespace string, repositories []os.DirEntry) bool {
 	if !strings.Contains(namespace, "--") {
+		return false
+	}
+	if len(repositories) != 1 || repositories[0].Name() != "snapshots" || !repositories[0].IsDir() {
 		return false
 	}
 	snapshots := filepath.Join(namespacePath, "snapshots")

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -79,9 +80,13 @@ func Active(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	pid, err := strconv.Atoi(string(bytesTrimSpace(b)))
+	contents := bytesTrimSpace(b)
+	if len(contents) == 0 {
+		return probeAdvisory(path)
+	}
+	pid, err := strconv.Atoi(string(contents))
 	if err != nil || pid <= 0 {
-		return true, nil
+		return probeAdvisory(path)
 	}
 	_, err = os.Stat(filepath.Join("/proc", strconv.Itoa(pid)))
 	if err == nil {
@@ -91,4 +96,22 @@ func Active(path string) (bool, error) {
 		return false, nil
 	}
 	return true, err
+}
+
+func probeAdvisory(path string) (bool, error) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return true, err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if err == syscall.EWOULDBLOCK || err == syscall.EAGAIN {
+			return true, nil
+		}
+		return true, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_UN); err != nil {
+		return true, err
+	}
+	return false, nil
 }

@@ -79,6 +79,14 @@ func TestScanStatesAndIgnoresLegacyLayout(t *testing.T) {
 	makeRepo(t, root, "Acme", "Missing", "", true)
 	makeRepo(t, root, "Acme", "Empty", "v1", false)
 	makeRepo(t, root, "Acme", "Bad", "Revision:../escape,CreatedAt:now", true)
+	currentSnapshots := filepath.Join(root, "Acme--Team", "snapshots", "files")
+	if err := os.MkdirAll(currentSnapshots, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(currentSnapshots, "partial.tmp"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeRepo(t, root, "Acme--Team", "Sibling", "v1", true)
 	legacy := filepath.Join(root, "Acme--Legacy", "snapshots", "master")
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
@@ -90,7 +98,7 @@ func TestScanStatesAndIgnoresLegacyLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 3 {
+	if len(models) != 5 {
 		t.Fatalf("models=%#v", models)
 	}
 	statuses := map[string]string{}
@@ -99,6 +107,9 @@ func TestScanStatesAndIgnoresLegacyLayout(t *testing.T) {
 	}
 	if statuses["Acme/Missing"] != "incomplete" || statuses["Acme/Empty"] != "invalid" || statuses["Acme/Bad"] != "invalid" {
 		t.Fatalf("statuses=%#v", statuses)
+	}
+	if statuses["Acme--Team/snapshots"] != "incomplete" || statuses["Acme--Team/Sibling"] != "ready" {
+		t.Fatalf("current namespace statuses=%#v", statuses)
 	}
 }
 
@@ -112,7 +123,7 @@ func TestScanRejectsTemporaryAndDanglingFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Status != "invalid" {
+	if len(models) != 1 || models[0].Status != "invalid" || !models[0].Preferred {
 		t.Fatalf("models=%#v", models)
 	}
 	if err := os.Remove(filepath.Join(dir, "part.tmp")); err != nil {

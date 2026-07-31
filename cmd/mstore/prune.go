@@ -428,7 +428,7 @@ func hasPruneLock(path string) (bool, error) {
 	return locked, err
 }
 
-func removePruneTarget(item pruneItem) error {
+func removePruneTarget(item pruneItem) (err error) {
 	root, err := providerCacheRoot(item.Provider)
 	if err != nil {
 		return err
@@ -452,7 +452,13 @@ func removePruneTarget(item pruneItem) error {
 	restore := true
 	defer func() {
 		if restore {
-			_ = os.Rename(claim, path)
+			if restoreErr := os.Rename(claim, path); restoreErr != nil {
+				if err == nil {
+					err = fmt.Errorf("restore claimed target %s: %w (claimed data remains at %s)", path, restoreErr, claim)
+				} else {
+					err = fmt.Errorf("%w; restore claimed target %s: %v (claimed data remains at %s)", err, path, restoreErr, claim)
+				}
+			}
 		}
 	}()
 	if locked, lockErr := hasProviderLock(root, item); lockErr != nil {
