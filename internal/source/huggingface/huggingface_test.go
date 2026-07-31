@@ -75,6 +75,18 @@ func TestScanRejectsSymlinkOutsideBlobs(t *testing.T) {
 	}
 }
 
+func TestScanReportsEmptySnapshotsAsIncomplete(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "models--Acme--Empty")
+	if err := os.MkdirAll(filepath.Join(repo, "snapshots"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	models, err := Scan(root)
+	if err != nil || len(models) != 1 || models[0].Status != "incomplete" || models[0].Path != repo {
+		t.Fatalf("models=%#v err=%v", models, err)
+	}
+}
+
 func TestResolveNamedRef(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HF_HUB_CACHE", root)

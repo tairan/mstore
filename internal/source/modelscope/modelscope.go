@@ -158,7 +158,18 @@ func isLegacyRepository(namespacePath, namespace string, repositories []os.DirEn
 	if !strings.Contains(namespace, "--") {
 		return false
 	}
-	if len(repositories) != 1 || repositories[0].Name() != "snapshots" || !repositories[0].IsDir() {
+	snapshotDir := false
+	for _, repository := range repositories {
+		if !repository.IsDir() {
+			continue
+		}
+		if repository.Name() == "snapshots" {
+			snapshotDir = true
+			continue
+		}
+		return false
+	}
+	if !snapshotDir {
 		return false
 	}
 	snapshots := filepath.Join(namespacePath, "snapshots")

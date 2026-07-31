@@ -374,7 +374,7 @@ func validatePruneRoots(s *store.Store, provider string) error {
 	if provider == "all" {
 		providersToCheck = []string{"hf", "ms"}
 	}
-	storeRoot, err := filepath.Abs(filepath.Clean(s.Root))
+	storeRoot, err := canonicalPath(s.Root)
 	if err != nil {
 		return err
 	}
@@ -383,7 +383,7 @@ func validatePruneRoots(s *store.Store, provider string) error {
 		if rootErr != nil {
 			return rootErr
 		}
-		cacheRoot, rootErr = filepath.Abs(filepath.Clean(cacheRoot))
+		cacheRoot, rootErr = canonicalPath(cacheRoot)
 		if rootErr != nil {
 			return rootErr
 		}
@@ -392,6 +392,32 @@ func validatePruneRoots(s *store.Store, provider string) error {
 		}
 	}
 	return nil
+}
+
+func canonicalPath(path string) (string, error) {
+	path, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", err
+	}
+	var suffix []string
+	for current := path; ; {
+		resolved, resolveErr := filepath.EvalSymlinks(current)
+		if resolveErr == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(resolveErr, os.ErrNotExist) {
+			return "", resolveErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path, nil
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
 }
 
 func pathsOverlap(a, b string) bool {

@@ -94,6 +94,9 @@ func TestScanStatesAndIgnoresLegacyLayout(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(legacy, "config.json"), []byte("{}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "Acme--Legacy", ".lock"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	models, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)

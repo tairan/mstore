@@ -304,3 +304,17 @@ func TestCLIPruneRejectsProviderStoreRootOverlap(t *testing.T) {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
+
+func TestCLIPruneRejectsSymlinkedProviderStoreOverlap(t *testing.T) {
+	storeRoot := t.TempDir()
+	cache := t.TempDir()
+	if err := os.Symlink(storeRoot, filepath.Join(cache, "models")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HF_HUB_CACHE", filepath.Join(t.TempDir(), "missing"))
+	t.Setenv("MODELSCOPE_CACHE", cache)
+	var out, errOut bytes.Buffer
+	if code := run([]string{"--store", storeRoot, "prune", "--provider", "ms"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "overlaps ms provider cache root") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}

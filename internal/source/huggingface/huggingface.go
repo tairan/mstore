@@ -50,10 +50,12 @@ func Scan(root string) ([]source.Model, error) {
 			continue
 		}
 		preferred := preferredRevision(filepath.Join(root, repoDir.Name()))
+		found := false
 		for _, rev := range revisions {
 			if !rev.IsDir() || rev.Name() == "" {
 				continue
 			}
+			found = true
 			m := source.Model{
 				Provider: "hf", Repo: repo, Revision: rev.Name(),
 				Path: filepath.Join(snapshots, rev.Name()), Status: "ready",
@@ -63,6 +65,10 @@ func Scan(root string) ([]source.Model, error) {
 				m.Status, m.Error = "invalid", scanErr.Error()
 			}
 			out = append(out, m)
+		}
+		if !found {
+			out = append(out, source.Model{Provider: "hf", Repo: repo,
+				Path: filepath.Join(root, repoDir.Name()), Status: "incomplete", Error: "missing usable snapshots"})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref() < out[j].Ref() })
