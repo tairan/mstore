@@ -490,12 +490,50 @@ func (s *Store) Rename(oldName, newName string, dryRun bool) error {
 
 func (s *Store) Remove(ref string, inactive, allVersions, force, dryRun bool) ([]string, error) {
 	name, version := splitRef(ref)
-	if version == "" && !inactive && !allVersions {
+	var sourceRef *source.Ref
+	if strings.HasPrefix(ref, "hf:") || strings.HasPrefix(ref, "ms:") {
+		parsed, err := source.ParseRef(ref)
+		if err != nil {
+			return nil, fmt.Errorf("invalid source reference: %w", err)
+		}
+		if parsed.Revision == "" {
+			return nil, fmt.Errorf("remove source reference requires a revision: %s", ref)
+		}
+		if inactive || allVersions {
+			return nil, fmt.Errorf("--inactive and --all-versions require a model name, not a source reference")
+		}
+		sourceRef = &parsed
+		name, version = "", ""
+	}
+	if sourceRef == nil && version == "" && !inactive && !allVersions {
 		return nil, fmt.Errorf("remove requires model@version unless --inactive or --all-versions is used")
 	}
 	versions, err := s.List(name)
 	if err != nil {
 		return nil, err
+	}
+	if sourceRef != nil {
+		var matches []Version
+		for _, candidate := range versions {
+			if candidate.Manifest.Source.Provider != sourceRef.Provider ||
+				candidate.Manifest.Source.Repo != sourceRef.Repo ||
+				!strings.HasPrefix(candidate.Manifest.Source.Revision, sourceRef.Revision) {
+				continue
+			}
+			matches = append(matches, candidate)
+		}
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("no stored version matches source %s", ref)
+		}
+		if len(matches) > 1 {
+			refs := make([]string, 0, len(matches))
+			for _, candidate := range matches {
+				refs = append(refs, candidate.Name+"@"+candidate.Version)
+			}
+			return nil, fmt.Errorf("source %s matches multiple stored versions; use one of: %s", ref, strings.Join(refs, ", "))
+		}
+		name, version = matches[0].Name, matches[0].Version
+		versions = matches
 	}
 	var targets []Version
 	for _, v := range versions {

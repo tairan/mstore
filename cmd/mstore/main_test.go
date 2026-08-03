@@ -54,6 +54,38 @@ func TestCLIImportPathAndJSON(t *testing.T) {
 	}
 }
 
+func TestCLIRemoveAcceptsTrailingOptionsAndProviderSource(t *testing.T) {
+	storeRoot := t.TempDir()
+	revision := "0123456789abcdef0123456789abcdef"
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := s.Import(source.Model{
+		Provider: "hf", Repo: "Acme/Source", Revision: revision,
+		Path: dir, Status: "ready",
+	}, store.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{
+		"--store", storeRoot, "rm",
+		"hf:Acme/Source@" + revision, "--yes",
+	}, &out, &errOut)
+	if code != 0 || !strings.Contains(out.String(), "removed source@"+imported.Version) {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(imported.Path); !os.IsNotExist(err) {
+		t.Fatalf("published path still exists: %v", err)
+	}
+}
+
 func TestCLIUsageExitCode(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run([]string{"unknown"}, &out, &errOut); code != 2 {
@@ -76,6 +108,7 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 		"  ModelScope cache: $MODELSCOPE_CACHE/models or ~/.cache/modelscope/hub/models",
 		"      Write ./models.toml by default. Existing files are protected unless",
 		"  generate:  --config FILE  --all  --current-only  --uv  --hf-mirror",
+		"  remove:    model@version or hf:repo@revision  --inactive  --all-versions  --force  --yes  --dry-run",
 		"  mstore generate --all > download-models.sh",
 		"  mstore generate --config models.toml > download-models.sh",
 		"  mstore generate --uv --hf-mirror --all > download-models.sh",

@@ -658,7 +658,24 @@ func (a *app) remove(args []string) error {
 	force := f.Bool("force", false, "")
 	yes := f.Bool("yes", false, "")
 	dryRun := f.Bool("dry-run", false, "")
-	if err := f.Parse(args); err != nil {
+	// The standard flag package stops parsing at the first positional argument.
+	// Keep remove ergonomic and accept its boolean options on either side of the
+	// model reference, as shown in the documentation.
+	flagArgs := make([]string, 0, len(args))
+	positionalArgs := make([]string, 0, 1)
+	for i, arg := range args {
+		if arg == "--" {
+			positionalArgs = append(positionalArgs, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(arg, "-") {
+			flagArgs = append(flagArgs, arg)
+		} else {
+			positionalArgs = append(positionalArgs, arg)
+		}
+	}
+	flagArgs = append(flagArgs, positionalArgs...)
+	if err := f.Parse(flagArgs); err != nil {
 		return usageError("%v", err)
 	}
 	if len(f.Args()) != 1 {
@@ -817,6 +834,7 @@ Selected command options:
   import:    --name NAME  --version VER  --activate  --hash  --jobs N  --dry-run
   sync:      --provider hf|ms|all  --config FILE  --activate  --hash  --jobs N  --dry-run
   generate:  --config FILE  --all  --current-only  --uv  --hf-mirror
+  remove:    model@version or hf:repo@revision  --inactive  --all-versions  --force  --yes  --dry-run
   cache:     path  clean [--path PATH] --yes
   prune:     --provider hf|ms|all  --status incomplete,invalid,conflict  --dry-run  --yes  --force  --json
 
