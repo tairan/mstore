@@ -153,6 +153,18 @@ name = "qwen3-tts"
 导入单位：同一 snapshot 内的多个量化文件会一起发布。不同量化 repo 或 revision
 可使用 `model-q4-k-m`、`model-q8-0` 等不同名称。
 
+如果要导出已经发布到 mstore store 的 revision，而不是扫描 provider cache，可使用
+`--imported`。导出会保留 mstore 中的目标名称，并默认写入 `enabled = true`：
+
+```sh
+mstore config export --imported --output imported-models.toml
+mstore config check imported-models.toml
+```
+
+这仍然不会激活模型。之后执行 `sync --config` 时，每个启用的来源仍必须存在于
+provider cache 且状态为 ready。如果同一个 source 曾以多个名称导入，v1 配置格式
+无法同时表达这些名称，导出会直接失败，不会静默丢弃其中一个。
+
 查看、激活和校验：
 
 ```sh
@@ -284,7 +296,7 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 - `scan`：`--provider`、`--ready-only`、`--new-only`、`--long`
 - `import`：`--name`、`--version`、`--activate`、`--hash`、`--jobs`、`--dry-run`
 - `sync`：`--provider`、`--config`、`--activate`、`--hash`、`--jobs`、`--dry-run`
-- `config export`：`--output`、`--provider`、`--overwrite`
+- `config export`：`--output`、`--provider`、`--imported`、`--overwrite`
 - `config check`：`FILE`
 - `cache clean`：`--path PATH`、`--yes`
 - `generate`（别名 `gen`）：模型引用或 `--all`；搭配 `--all` 可使用

@@ -333,6 +333,7 @@ func (a *app) config(args []string) error {
 		f := newFlags("config export")
 		output := f.String("output", "models.toml", "")
 		provider := f.String("provider", "all", "")
+		imported := f.Bool("imported", false, "")
 		overwrite := f.Bool("overwrite", false, "")
 		if err := f.Parse(args[1:]); err != nil {
 			return usageError("%v", err)
@@ -344,16 +345,39 @@ func (a *app) config(args []string) error {
 			return err
 		}
 		path := modelconfig.OutputPath(*output)
-		models, scanErrs := providers.Scan(*provider)
-		for _, scanErr := range scanErrs {
-			fmt.Fprintln(a.err, "mstore config export:", scanErr)
-			if !errors.Is(scanErr, os.ErrNotExist) {
-				return fmt.Errorf("scan provider caches: %w", scanErr)
+		var exported int
+		var err error
+		if *imported {
+			versions, err := a.store.List("")
+			if err != nil {
+				return fmt.Errorf("list imported models: %w", err)
 			}
-		}
-		exported, err := modelconfig.Export(path, models, *overwrite)
-		if err != nil {
-			return err
+			models := make([]modelconfig.ImportedModel, 0, len(versions))
+			for _, version := range versions {
+				if *provider != "all" && version.Manifest.Source.Provider != *provider {
+					continue
+				}
+				models = append(models, modelconfig.ImportedModel{
+					Source: fmt.Sprintf("%s:%s@%s", version.Manifest.Source.Provider, version.Manifest.Source.Repo, version.Manifest.Source.Revision),
+					Name:   version.Name,
+				})
+			}
+			exported, err = modelconfig.ExportImported(path, models, *overwrite)
+			if err != nil {
+				return err
+			}
+		} else {
+			models, scanErrs := providers.Scan(*provider)
+			for _, scanErr := range scanErrs {
+				fmt.Fprintln(a.err, "mstore config export:", scanErr)
+				if !errors.Is(scanErr, os.ErrNotExist) {
+					return fmt.Errorf("scan provider caches: %w", scanErr)
+				}
+			}
+			exported, err = modelconfig.Export(path, models, *overwrite)
+			if err != nil {
+				return err
+			}
 		}
 		if a.global.json {
 			return writeJSON(a.out, map[string]any{"path": path, "models": exported})
@@ -818,9 +842,10 @@ Global options:
   -V, --version      Show version.
 
 Model config:
-  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]
+  mstore config export [--output FILE] [--provider hf|ms|all] [--imported] [--overwrite]
       Write ./models.toml by default. Existing files are protected unless
       --overwrite is supplied.
+      --imported exports stored models with enabled = true.
   mstore config check FILE
       Validate a TOML model selection file.
   mstore sync --config FILE [--activate] [--hash] [--jobs N] [--dry-run]

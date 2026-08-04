@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chieworks/mstore/internal/modelconfig"
 	"github.com/chieworks/mstore/internal/providers"
 	"github.com/chieworks/mstore/internal/reconcile"
 	"github.com/chieworks/mstore/internal/source"
@@ -134,7 +135,7 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 		"  cache clean          Remove a marked mstore download cache.",
 		"  prune                Preview or remove abnormal provider cache entries.",
 		"  --store PATH       Store root (default: ${MSTORE_HOME:-~/models}).",
-		"  mstore config export [--output FILE] [--provider hf|ms|all] [--overwrite]",
+		"  mstore config export [--output FILE] [--provider hf|ms|all] [--imported] [--overwrite]",
 		"  ModelScope cache: $MODELSCOPE_CACHE/models or ~/.cache/modelscope/hub/models",
 		"      Write ./models.toml by default. Existing files are protected unless",
 		"  generate:  --config FILE  --all  --current-only  --uv  --hf-mirror",
@@ -171,6 +172,56 @@ func TestCLIConfigExportDefaultsToProtectedModelsToml(t *testing.T) {
 	errOut.Reset()
 	if code := run([]string{"config", "export"}, &out, &errOut); code == 0 || !strings.Contains(errOut.String(), "warning: config models.toml already exists") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
+func TestCLIConfigExportImportedDefaultsToEnabled(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []struct {
+		provider string
+		repo     string
+		revision string
+		name     string
+	}{
+		{provider: "hf", repo: "Acme/Widget", revision: "0123456789abcdef", name: "custom-widget"},
+		{provider: "ms", repo: "Qwen/Demo", revision: "v1.2.3", name: "demo"},
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Import(source.Model{
+			Provider: model.provider, Repo: model.repo, Revision: model.revision,
+			Path: dir, Status: "ready",
+		}, store.ImportOptions{Name: model.name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	output := filepath.Join(t.TempDir(), "imported.toml")
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "config", "export", "--imported", "--output", output}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	file, err := modelconfig.Read(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Models) != 2 {
+		t.Fatalf("models=%#v", file.Models)
+	}
+	for _, model := range file.Models {
+		if !model.Enabled {
+			t.Fatalf("imported model is disabled: %#v", model)
+		}
+	}
+	if file.Models[0].Name != "custom-widget" || file.Models[1].Name != "demo" {
+		t.Fatalf("unexpected imported model names: %#v", file.Models)
 	}
 }
 
