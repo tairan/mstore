@@ -151,7 +151,7 @@ func TestCLIHelpIsAlignedAndIncludesGenerate(t *testing.T) {
 
 func TestCLIVersion(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if code := run([]string{"--version"}, &out, &errOut); code != 0 || out.String() != "mstore 0.3.2\n" {
+	if code := run([]string{"--version"}, &out, &errOut); code != 0 || out.String() != "mstore 0.3.3\n" {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
 	}
 }
