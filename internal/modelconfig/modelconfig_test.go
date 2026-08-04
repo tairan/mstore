@@ -111,7 +111,7 @@ func TestExportImportedRejectsDuplicateSourceNames(t *testing.T) {
 		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "widget-a"},
 		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "widget-b"},
 	}, false)
-	if err == nil || !strings.Contains(err.Error(), "multiple model names") {
+	if err == nil || !strings.Contains(err.Error(), "conflict") || !strings.Contains(err.Error(), "multiple model names") {
 		t.Fatalf("duplicate source error = %v", err)
 	}
 }

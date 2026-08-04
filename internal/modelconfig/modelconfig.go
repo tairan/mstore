@@ -175,7 +175,7 @@ func ExportImported(path string, models []ImportedModel, overwrite bool) (int, e
 			if prior == model.Name {
 				continue
 			}
-			return 0, fmt.Errorf("imported source %q is used by multiple model names %q and %q", model.Source, prior, model.Name)
+			return 0, fmt.Errorf("conflict: imported source %q is used by multiple model names %q and %q", model.Source, prior, model.Name)
 		}
 		if err := naming.Validate(model.Name); err != nil {
 			return 0, fmt.Errorf("imported model %q: %w", model.Source, err)

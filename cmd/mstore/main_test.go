@@ -225,6 +225,31 @@ func TestCLIConfigExportImportedDefaultsToEnabled(t *testing.T) {
 	}
 }
 
+func TestCLIConfigExportImportedAliasConflictUsesConflictExitCode(t *testing.T) {
+	storeRoot := t.TempDir()
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := source.Model{Provider: "hf", Repo: "Acme/Widget", Revision: "0123456789abcdef", Path: dir, Status: "ready"}
+	for _, name := range []string{"widget-a", "widget-b"} {
+		if _, err := s.Import(src, store.ImportOptions{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	output := filepath.Join(t.TempDir(), "imported.toml")
+	var out, errOut bytes.Buffer
+	code := run([]string{"--store", storeRoot, "config", "export", "--imported", "--output", output}, &out, &errOut)
+	if code != 4 || !strings.Contains(errOut.String(), "conflict") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+}
+
 func TestExitCodeClassifiesProviderScanFailure(t *testing.T) {
 	err := &reconcile.RunError{
 		Failed: 1,
