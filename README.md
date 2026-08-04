@@ -163,6 +163,20 @@ when multiple quantized files live in one snapshot, they are published together.
 Different quantization repos or revisions can be given separate names such as
 `model-q4-k-m` and `model-q8-0`.
 
+To export the revisions already published in the mstore store instead of
+scanning provider caches, use `--imported`. Imported entries retain their
+stored destination names and are written with `enabled = true`:
+
+```sh
+mstore config export --imported --output imported-models.toml
+mstore config check imported-models.toml
+```
+
+This still does not activate models. A later `sync --config` requires each
+enabled source to be available and ready in the provider cache. If one source
+was imported under multiple names, the v1 config format cannot represent both
+names and the export fails instead of silently dropping one.
+
 Inspect, activate, and verify:
 
 ```sh
@@ -313,7 +327,7 @@ Important command options:
 - `scan`: `--provider`, `--ready-only`, `--new-only`, `--long`
 - `import`: `--name`, `--version`, `--activate`, `--hash`, `--jobs`, `--dry-run`
 - `sync`: `--provider`, `--config`, `--activate`, `--hash`, `--jobs`, `--dry-run`
-- `config export`: `--output`, `--provider`, `--overwrite`
+- `config export`: `--output`, `--provider`, `--imported`, `--overwrite`
 - `config check`: `FILE`
 - `cache clean`: `--path PATH`, `--yes`
 - `generate` (`gen` alias): model refs or `--all`; `--current-only` with `--all`;

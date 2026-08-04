@@ -78,6 +78,44 @@ func TestExportUsesFallbackNameWhenDefaultNameIsInvalid(t *testing.T) {
 	}
 }
 
+func TestExportImportedWritesEnabledModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.toml")
+	models := []ImportedModel{
+		{Source: "ms:Qwen/Demo@v1.2.3", Name: "demo"},
+		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "custom-widget"},
+		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "custom-widget"},
+	}
+	if count, err := ExportImported(path, models, false); err != nil || count != 2 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	file, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Models) != 2 {
+		t.Fatalf("models=%#v", file.Models)
+	}
+	for _, model := range file.Models {
+		if !model.Enabled {
+			t.Fatalf("imported model is disabled: %#v", model)
+		}
+	}
+	if file.Models[0].Source != "hf:Acme/Widget@0123456789abcdef" || file.Models[0].Name != "custom-widget" {
+		t.Fatalf("models are not sorted by source: %#v", file.Models)
+	}
+}
+
+func TestExportImportedRejectsDuplicateSourceNames(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.toml")
+	_, err := ExportImported(path, []ImportedModel{
+		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "widget-a"},
+		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "widget-b"},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "conflict") || !strings.Contains(err.Error(), "multiple model names") {
+		t.Fatalf("duplicate source error = %v", err)
+	}
+}
+
 func TestOutputPathAddsTomlExtensionOnlyWhenMissing(t *testing.T) {
 	for input, want := range map[string]string{
 		"models":      "models.toml",

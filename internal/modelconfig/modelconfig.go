@@ -45,6 +45,12 @@ type Model struct {
 	Name    string `toml:"name"`
 }
 
+// ImportedModel is a model already published in the mstore store.
+type ImportedModel struct {
+	Source string
+	Name   string
+}
+
 // Selection is one enabled model ready to pass to reconciliation.
 type Selection struct {
 	Source source.Ref
@@ -131,28 +137,82 @@ func Selections(file File) ([]Selection, error) {
 // Export writes a deliberately conservative candidate file: no model is enabled.
 // It returns the number of ready models written to the file.
 func Export(path string, models []source.Model, overwrite bool) (int, error) {
-	ready := make([]source.Model, 0, len(models))
+	entries := make([]exportEntry, 0, len(models))
 	for _, model := range models {
-		if model.Status == "ready" {
-			ready = append(ready, model)
+		if model.Status != "ready" {
+			continue
 		}
+		name, err := naming.Normalize(model.Repo)
+		if err != nil {
+			name = fallbackName(model.Ref())
+			entries = append(entries, exportEntry{
+				Source: model.Ref(), Name: name, Comment: fmt.Sprintf(
+					"Default name could not be derived for %s; choose a descriptive name before enabling it.", model.Ref()),
+			})
+			continue
+		}
+		entries = append(entries, exportEntry{Source: model.Ref(), Name: name})
 	}
-	sort.Slice(ready, func(i, j int) bool { return ready[i].Ref() < ready[j].Ref() })
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Source < entries[j].Source })
+	return write(path, entries, overwrite)
+}
+
+// ExportImported writes all imported source revisions as enabled selections.
+// A source imported under multiple names cannot be represented by the v1
+// config format, so it returns an error instead of silently dropping a name.
+func ExportImported(path string, models []ImportedModel, overwrite bool) (int, error) {
+	entries := make([]exportEntry, 0, len(models))
+	seen := map[string]string{}
+	for _, model := range models {
+		ref, err := source.ParseRef(model.Source)
+		if err != nil {
+			return 0, fmt.Errorf("imported model %q: %w", model.Source, err)
+		}
+		if ref.Revision == "" {
+			return 0, fmt.Errorf("imported model %q must include an immutable revision", model.Source)
+		}
+		if prior, ok := seen[model.Source]; ok {
+			if prior == model.Name {
+				continue
+			}
+			return 0, fmt.Errorf("conflict: imported source %q is used by multiple model names %q and %q", model.Source, prior, model.Name)
+		}
+		if err := naming.Validate(model.Name); err != nil {
+			return 0, fmt.Errorf("imported model %q: %w", model.Source, err)
+		}
+		seen[model.Source] = model.Name
+		entries = append(entries, exportEntry{Source: model.Source, Name: model.Name, Enabled: true})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Source != entries[j].Source {
+			return entries[i].Source < entries[j].Source
+		}
+		return entries[i].Name < entries[j].Name
+	})
+	return write(path, entries, overwrite)
+}
+
+type exportEntry struct {
+	Source  string
+	Enabled bool
+	Name    string
+	Comment string
+}
+
+func write(path string, entries []exportEntry, overwrite bool) (int, error) {
 	var b strings.Builder
 	b.WriteString("# mstore model selection file (schema 1).\n")
 	b.WriteString("# Set enabled = true for models that mstore sync should publish.\n")
 	b.WriteString("schema = 1\n\n[defaults]\nhash = false\n")
-	for _, model := range ready {
-		name, err := naming.Normalize(model.Repo)
-		if err != nil {
-			name = fallbackName(model.Ref())
-			fmt.Fprintf(&b, "\n# Default name could not be derived for %s; choose a descriptive name before enabling it.\n", model.Ref())
+	for _, entry := range entries {
+		if entry.Comment != "" {
+			fmt.Fprintf(&b, "\n# %s\n", entry.Comment)
 		}
-		fmt.Fprintf(&b, "\n[[models]]\nsource = %q\nenabled = false\nname = %q\n", model.Ref(), name)
+		fmt.Fprintf(&b, "\n[[models]]\nsource = %q\nenabled = %t\nname = %q\n", entry.Source, entry.Enabled, entry.Name)
 	}
 	data := []byte(b.String())
 	if overwrite {
-		return len(ready), os.WriteFile(path, data, 0o644)
+		return len(entries), os.WriteFile(path, data, 0o644)
 	}
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
@@ -168,7 +228,7 @@ func Export(path string, models []source.Model, overwrite bool) (int, error) {
 	if err := f.Close(); err != nil {
 		return 0, err
 	}
-	return len(ready), nil
+	return len(entries), nil
 }
 
 func fallbackName(ref string) string {
