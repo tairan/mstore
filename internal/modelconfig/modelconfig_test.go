@@ -83,6 +83,7 @@ func TestExportImportedWritesEnabledModels(t *testing.T) {
 	models := []ImportedModel{
 		{Source: "ms:Qwen/Demo@v1.2.3", Name: "demo"},
 		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "custom-widget"},
+		{Source: "hf:Acme/Widget@0123456789abcdef", Name: "custom-widget"},
 	}
 	if count, err := ExportImported(path, models, false); err != nil || count != 2 {
 		t.Fatalf("count=%d err=%v", count, err)

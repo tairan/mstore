@@ -172,6 +172,9 @@ func ExportImported(path string, models []ImportedModel, overwrite bool) (int, e
 			return 0, fmt.Errorf("imported model %q must include an immutable revision", model.Source)
 		}
 		if prior, ok := seen[model.Source]; ok {
+			if prior == model.Name {
+				continue
+			}
 			return 0, fmt.Errorf("imported source %q is used by multiple model names %q and %q", model.Source, prior, model.Name)
 		}
 		if err := naming.Validate(model.Name); err != nil {
