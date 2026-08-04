@@ -21,7 +21,7 @@ import (
 	"github.com/chieworks/mstore/internal/store"
 )
 
-var version = "0.3.3"
+var version = "0.3.4"
 
 type globalOptions struct {
 	store   string
