@@ -171,6 +171,24 @@ func TestRemoveAcceptsProviderSourceReference(t *testing.T) {
 	}
 }
 
+func TestRemoveProviderSourcePrefersExactRevision(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	for _, revision := range []string{"main", "main-old"} {
+		src := fixtureSource(t, "Acme/Branches", revision)
+		if _, err := s.Import(src, ImportOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	removed, err := s.Remove("hf:Acme/Branches@main", false, false, false, false)
+	if err != nil || len(removed) != 1 || removed[0] != "branches@main" {
+		t.Fatalf("remove exact source revision: removed=%#v err=%v", removed, err)
+	}
+	if _, err := s.Resolve("branches@main-old"); err != nil {
+		t.Fatalf("prefix revision was removed instead of exact revision: %v", err)
+	}
+}
+
 func TestImportRejectsReservedCurrentVersion(t *testing.T) {
 	s, _ := Open(t.TempDir())
 	src := fixtureSource(t, "Acme/Current", "current-release")

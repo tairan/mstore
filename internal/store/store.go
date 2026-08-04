@@ -513,14 +513,23 @@ func (s *Store) Remove(ref string, inactive, allVersions, force, dryRun bool) ([
 		return nil, err
 	}
 	if sourceRef != nil {
-		var matches []Version
+		var exactMatches []Version
+		var prefixMatches []Version
 		for _, candidate := range versions {
 			if candidate.Manifest.Source.Provider != sourceRef.Provider ||
 				candidate.Manifest.Source.Repo != sourceRef.Repo ||
 				!strings.HasPrefix(candidate.Manifest.Source.Revision, sourceRef.Revision) {
 				continue
 			}
-			matches = append(matches, candidate)
+			if candidate.Manifest.Source.Revision == sourceRef.Revision {
+				exactMatches = append(exactMatches, candidate)
+			} else {
+				prefixMatches = append(prefixMatches, candidate)
+			}
+		}
+		matches := exactMatches
+		if len(matches) == 0 {
+			matches = prefixMatches
 		}
 		if len(matches) == 0 {
 			return nil, fmt.Errorf("no stored version matches source %s", ref)

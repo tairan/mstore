@@ -665,6 +665,7 @@ func (a *app) remove(args []string) error {
 	positionalArgs := make([]string, 0, 1)
 	for i, arg := range args {
 		if arg == "--" {
+			flagArgs = append(flagArgs, "--")
 			positionalArgs = append(positionalArgs, args[i+1:]...)
 			break
 		}

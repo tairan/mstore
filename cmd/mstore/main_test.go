@@ -86,6 +86,36 @@ func TestCLIRemoveAcceptsTrailingOptionsAndProviderSource(t *testing.T) {
 	}
 }
 
+func TestCLIRemovePreservesOptionTerminator(t *testing.T) {
+	storeRoot := t.TempDir()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(storeRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := s.Import(source.Model{
+		Provider: "hf", Repo: "Acme/Source", Revision: "0123456789abcdef",
+		Path: dir, Status: "ready",
+	}, store.ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	code := run([]string{
+		"--store", storeRoot, "rm", "--", "--yes", "source@" + imported.Version,
+	}, &out, &errOut)
+	if code != 2 || !strings.Contains(errOut.String(), "remove requires one model ref") {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(imported.Path); err != nil {
+		t.Fatalf("terminator-shaped invocation removed the model: %v", err)
+	}
+}
+
 func TestCLIUsageExitCode(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run([]string{"unknown"}, &out, &errOut); code != 2 {
