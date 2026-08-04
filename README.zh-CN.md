@@ -234,8 +234,9 @@ manifest 生成的脚本；`defaults.hash = true` 会使这些导入带上 `--ha
 
 ```sh
 mstore rename old-name new-name --dry-run
-mstore remove model@version --yes
-mstore remove model --inactive --yes
+mstore rm --yes model@version
+mstore rm --yes 'hf:namespace/repo@revision'
+mstore rm --inactive --yes model
 mstore gc --older-than 24h --dry-run
 mstore prune --dry-run
 mstore prune --yes
@@ -245,7 +246,12 @@ mstore cache clean --yes
 mstore cache clean --path /srv/mstore-downloads --yes
 ```
 
-除非显式指定 `--force`，`remove` 会保护当前激活版本。`gc` 只清理 staging
+`rm` 是 `remove` 的别名。它既接受 `model@version`，也接受完整的
+`hf:namespace/repo@revision` 或 `ms:namespace/repo@revision` source 引用；后者会按
+manifest 定位已发布版本，因此不需要手工把仓库名转换成 mstore 名称，也不需要记住版本目录的
+12 位前缀。source 引用的 revision 可以是完整值或能唯一匹配的前缀；如果同一 source 被用多个
+别名导入，命令会报出候选的 `model@version`，要求明确选择一个。`rm` 的选项可以放在模型引用
+前后。除非显式指定 `--force`，`remove` 会保护当前激活版本。`gc` 只清理 staging
 数据、`.part` 文件和失效锁；它不会删除已发布模型或 provider 缓存。`cache clean`
 必须显式确认，只会删除带有 mstore 所有权标记的缓存根目录；它会拒绝不安全的位置，
 绝不会删除 Hugging Face 或 ModelScope 的 provider 全局缓存。`prune` 默认只预览，
@@ -291,8 +297,8 @@ Provider 引用使用 `hf:namespace/repo[@revision]` 或
 - `verify`：`--all`、`--full`、`--record`、`--jobs`
 - `copy`：`--to`、`--all`、`--all-versions`、`--current-only`、
   `--verify none|quick|full`、`--jobs`、`--dry-run`
-- `remove`：`--inactive`、`--all-versions`、`--force`、`--yes`、
-  `--dry-run`
+- `remove` / `rm`：`model@version` 或 provider source 引用；`--inactive`、
+  `--all-versions`、`--force`、`--yes`、`--dry-run`
 - `gc`：`--older-than`、`--dry-run`
 - `prune`：`--provider hf|ms|all`、`--status incomplete,invalid,conflict`、
   `--dry-run`、`--yes`、`--force`、`--json`

@@ -259,8 +259,9 @@ Maintenance commands:
 
 ```sh
 mstore rename old-name new-name --dry-run
-mstore remove model@version --yes
-mstore remove model --inactive --yes
+mstore rm --yes model@version
+mstore rm --yes 'hf:namespace/repo@revision'
+mstore rm --inactive --yes model
 mstore gc --older-than 24h --dry-run
 mstore prune --dry-run
 mstore prune --yes
@@ -270,7 +271,14 @@ mstore cache clean --yes
 mstore cache clean --path /srv/mstore-downloads --yes
 ```
 
-`remove` protects the active version unless `--force` is explicit. `gc` only
+`rm` is an alias for `remove`. It accepts either `model@version` or a complete
+`hf:namespace/repo@revision` / `ms:namespace/repo@revision` source reference. The
+source form resolves the published version from its manifest, so callers do not
+need to normalize the repository name or remember the 12-character version
+directory prefix. The source revision may be complete or a uniquely matching
+prefix. If one source was imported under multiple aliases, the command reports
+the candidate `model@version` references and requires an explicit choice. Remove
+options may appear before or after the model reference. `remove` protects the active version unless `--force` is explicit. `gc` only
 cleans staging data, `.part` files, and stale locks; it never deletes published
 models or provider caches. `cache clean` is opt-in and removes only a cache root
 carrying mstore's ownership marker; it rejects unsafe locations and never
@@ -318,7 +326,8 @@ Important command options:
 - `verify`: `--all`, `--full`, `--record`, `--jobs`
 - `copy`: `--to`, `--all`, `--all-versions`, `--current-only`,
   `--verify none|quick|full`, `--jobs`, `--dry-run`
-- `remove`: `--inactive`, `--all-versions`, `--force`, `--yes`, `--dry-run`
+- `remove` / `rm`: `model@version` or a provider source reference; `--inactive`,
+  `--all-versions`, `--force`, `--yes`, `--dry-run`
 - `gc`: `--older-than`, `--dry-run`
 - `prune`: `--provider hf|ms|all`, `--status incomplete,invalid,conflict`,
   `--dry-run`, `--yes`, `--force`, `--json`

@@ -153,6 +153,42 @@ func TestNameConflictAndRemoveCurrentGuard(t *testing.T) {
 	}
 }
 
+func TestRemoveAcceptsProviderSourceReference(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	revision := "0123456789abcdef0123456789abcdef"
+	src := fixtureSource(t, "Acme/Source", revision)
+	imported, err := s.Import(src, ImportOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := s.Remove("hf:Acme/Source@"+revision, false, false, false, false)
+	if err != nil || len(removed) != 1 || removed[0] != "source@"+imported.Version {
+		t.Fatalf("remove by source: removed=%#v err=%v", removed, err)
+	}
+	if _, err := os.Stat(imported.Path); !os.IsNotExist(err) {
+		t.Fatalf("published path still exists: %v", err)
+	}
+}
+
+func TestRemoveProviderSourcePrefersExactRevision(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	for _, revision := range []string{"main", "main-old"} {
+		src := fixtureSource(t, "Acme/Branches", revision)
+		if _, err := s.Import(src, ImportOptions{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	removed, err := s.Remove("hf:Acme/Branches@main", false, false, false, false)
+	if err != nil || len(removed) != 1 || removed[0] != "branches@main" {
+		t.Fatalf("remove exact source revision: removed=%#v err=%v", removed, err)
+	}
+	if _, err := s.Resolve("branches@main-old"); err != nil {
+		t.Fatalf("prefix revision was removed instead of exact revision: %v", err)
+	}
+}
+
 func TestImportRejectsReservedCurrentVersion(t *testing.T) {
 	s, _ := Open(t.TempDir())
 	src := fixtureSource(t, "Acme/Current", "current-release")
